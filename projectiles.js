@@ -5,6 +5,42 @@
 // ==================== POOLS ====================
 var partPool = [];
 var dmgNumPool = [];
+var projPool = []; // Projectile mesh pool for reuse
+const PROJ_POOL_SIZE = 50; // Keep 50 reusable projectiles
+
+// Initialize projectile pool
+function initProjPool() {
+  for (let i = 0; i < PROJ_POOL_SIZE; i++) {
+    const m = new THREE.Mesh(spriteGeo, new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    projPool.push({ mesh: m, inUse: false });
+  }
+}
+
+function getProjMesh(col, w, h, shp = 'box') {
+  // Try to reuse from pool first
+  for (let p of projPool) {
+    if (!p.inUse) {
+      p.inUse = true;
+      const k = col + '_' + shp;
+      if (!spMatCache[k]) spMatCache[k] = new THREE.MeshBasicMaterial({ map: getSpTex(col, shp), transparent: true, side: THREE.DoubleSide, depthWrite: false });
+      p.mesh.material = spMatCache[k];
+      p.mesh.scale.set(w, h, 1);
+      return p.mesh;
+    }
+  }
+  // Fallback: create new if pool exhausted
+  return mkSprite(col, w, h, shp);
+}
+
+function releaseProjMesh(m) {
+  for (let p of projPool) {
+    if (p.mesh === m) {
+      p.inUse = false;
+      return;
+    }
+  }
+}
+
 var dmgNumCanvas = document.createElement('canvas');
 dmgNumCanvas.width = 80;
 dmgNumCanvas.height = 40;
@@ -14,10 +50,14 @@ var dmgNumCtx = dmgNumCanvas.getContext('2d');
 const _projTargetPos = new THREE.Vector3();
 const _projDir = new THREE.Vector3();
 const _projCurDir = new THREE.Vector3();
+const _projRight = new THREE.Vector3();
 
 // ==================== PROJECTILE CLASS ====================
 class Proj {
   constructor(pos, dir, dmg, col, speed, life, props = {}) {
+    const activeWeaponKey = (typeof WEAPONS !== 'undefined') ? Object.keys(WEAPONS).find(k => WEAPONS[k] && WEAPONS[k].active) : null;
+    const activeWeapon = activeWeaponKey ? WEAPONS[activeWeaponKey] : null;
+
     this.dmg = dmg;
     this.vel = dir.clone().normalize().multiplyScalar(speed);
     this.props = props;
@@ -33,6 +73,18 @@ class Proj {
     this.orbitSpeed = props.orbitSpeed || 2;
     this.orbitAngle = Math.random() * Math.PI * 2;
 
+    this.accel = props.accel || (activeWeapon && activeWeapon.kind === 'ranged' ? (activeWeapon.accel || 0) : 0);
+    this.drag = props.drag || (activeWeapon && activeWeapon.kind === 'ranged' ? (activeWeapon.drag || 0) : 0);
+    this.zigzagAmp = props.zigzagAmp || (activeWeapon && activeWeapon.kind === 'ranged' ? (activeWeapon.zigzagAmp || 0) : 0);
+    this.zigzagFreq = props.zigzagFreq || (activeWeapon && activeWeapon.kind === 'ranged' ? (activeWeapon.zigzagFreq || 0) : 0);
+    this.split = props.split || (activeWeapon ? Math.floor((activeWeapon.pathChaos || 0) / 2) : 0);
+    this.weaponPathPower = activeWeapon ? (activeWeapon.pathPower || 0) : 0;
+    this.weaponPathControl = activeWeapon ? (activeWeapon.pathControl || 0) : 0;
+
+    _projRight.set(-this.vel.z, 0, this.vel.x);
+    if (_projRight.lengthSq() < 0.0001) _projRight.set(1, 0, 0);
+    this.zigzagAxis = _projRight.normalize().clone();
+
     this.target = null;
     this.t = 0;
     this.maxT = life;
@@ -40,26 +92,35 @@ class Proj {
 
     const r = Math.min(1.2, 0.3 * (props.scale || 1) * GameState.pArea);
     const shape = props.shape || 'circle';
-    this.m = mkSprite(col, r, r, shape);
+    this.m = getProjMesh(col, r, r, shape); // Use pooled mesh instead of mkSprite
     this.m.position.copy(pos);
     scene.add(this.m);
   }
 
   update(dt, pp) {
-    if (pp) this.m.lookAt(pp);
+    if (pp && ((Math.floor(this.t * 60) & 1) === 0)) this.m.lookAt(pp);
     if (this.spin !== 0) {
         this.m.rotation.z += this.spin * this.t;
     }
 
     if (this.orbit) {
         this.t += dt;
-        if (this.t > this.maxT) { scene.remove(this.m); return true; }
+        if (this.t > this.maxT) { scene.remove(this.m); releaseProjMesh(this.m); return true; }
         
         this.orbitAngle += this.orbitSpeed * dt;
         this.m.position.x = pp.x + Math.cos(this.orbitAngle) * this.orbitRadius;
         this.m.position.z = pp.z + Math.sin(this.orbitAngle) * this.orbitRadius;
         this.m.position.y = pp.y + 1.0 + Math.sin(this.t * 3) * 0.5;
     } else {
+      if (this.accel !== 0) {
+        const spd = this.vel.length();
+        const nextSpd = Math.max(2, spd * (1 + this.accel * dt));
+        this.vel.setLength(nextSpd);
+      }
+      if (this.drag > 0) {
+        this.vel.multiplyScalar(Math.max(0.2, 1 - this.drag * dt));
+      }
+
         if (this.boomerang) {
             const spd = this.vel.length();
             const newSpd = spd - dt * 40;
@@ -93,10 +154,16 @@ class Proj {
         this.t += dt;
         if (this.t > this.maxT) {
             scene.remove(this.m);
+            releaseProjMesh(this.m);
             return true;
         }
 
         this.m.position.addScaledVector(this.vel, dt);
+
+        if (this.zigzagAmp > 0.001 && this.zigzagFreq > 0) {
+          const zz = Math.sin(this.t * this.zigzagFreq) * this.zigzagAmp;
+          this.m.position.addScaledVector(this.zigzagAxis, zz * dt * 9);
+        }
 
         if (this.m.position.y < terrainH(this.m.position.x, this.m.position.z)) {
             if (this.bounce > 0) {
@@ -106,7 +173,7 @@ class Proj {
                 this.vel.z *= 0.8;
                 this.m.position.y += 0.2;
             } else {
-                spawnPart(this.m.position, this.m.material.color.getHex(), 4, 2);
+                spawnPart(this.m.position, 0xffffff, 4, 2);
                 if (this.blast > 0) { // Blast on ground hit
                     spawnPart(this.m.position, 0xffaa00, 12, 8);
                     monsters.forEach(m2 => {
@@ -116,6 +183,7 @@ class Proj {
                     });
                 }
                 scene.remove(this.m);
+                releaseProjMesh(this.m);
                 return true;
             }
         }
@@ -139,6 +207,8 @@ class Proj {
         
         const isCrit = (this.props.fire && Math.random() < 0.3) || (Math.random() < 0.05 * GameState.pLuck);
         if (isCrit) dmg *= 2.0;
+        if (this.weaponPathPower > 0) dmg *= (1 + this.weaponPathPower * 0.03);
+        if (this.weaponPathControl > 0 && dist > 10) dmg *= (1 + this.weaponPathControl * 0.015);
         
         if (this.props.poison) {
             m.bleedStack += 5; // Utilise le système de saignement existant pour le poison
@@ -175,7 +245,26 @@ class Proj {
           this.vel.z += (Math.random() - 0.5) * 10;
           // Keep speed roughly same
         } else if (!this.orbit) {
+          if (this.split > 0 && !this.props._child) {
+            this.split--;
+            const n = 2;
+            for (let i = 0; i < n; i++) {
+              const d = this.vel.clone().normalize();
+              d.x += (Math.random() - 0.5) * 0.55;
+              d.y += (Math.random() - 0.5) * 0.35;
+              d.z += (Math.random() - 0.5) * 0.55;
+              d.normalize();
+              projectiles.push(new Proj(this.m.position.clone(), d, dmg * 0.45, this.m.material.color.getHex(), Math.max(12, this.vel.length() * 0.85), Math.max(0.45, this.maxT * 0.35), {
+                _child: true,
+                scale: 0.55,
+                shape: this.props.shape || 'diamond',
+                zigzagAmp: this.zigzagAmp * 0.6,
+                zigzagFreq: this.zigzagFreq * 1.2
+              }));
+            }
+          }
           scene.remove(this.m);
+          releaseProjMesh(this.m);
           return true;
         } else {
         }

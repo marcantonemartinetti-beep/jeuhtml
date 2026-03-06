@@ -35,12 +35,70 @@ function octave(x, z, oct, lac, gain) {
 
 let currentBiome = 'plains';
 function setTerrainBiome(id) { currentBiome = id; }
+let currentBiomeProfile = null;
+function setTerrainBiomeProfile(profile) { currentBiomeProfile = profile || null; }
 
 function terrainH(x, z) {
-  let val = octave(x * 0.01, z * 0.01, 4, 2, 0.5) * 15 + octave(x * 0.05, z * 0.05, 2, 2, 0.5) * 2;
+  const p = currentBiomeProfile;
+  const seedOff = p ? (p.seed % 997) * 0.01 : 0;
+  const bFreq = p ? p.terrainFreq : 0.01;
+  const dFreq = p ? p.terrainDetailFreq : 0.05;
+  const bAmp = p ? p.terrainAmp : 15;
+  const dAmp = p ? p.detailAmp : 2;
+  const layoutMode = p ? p.layoutMode : 0;
+  const layoutRadius = p ? p.layoutRadius : 220;
+  const layoutStrength = p ? p.layoutStrength : 4;
+
+  let val = octave((x + seedOff * 37) * bFreq, (z - seedOff * 53) * bFreq, 4, 2, 0.5) * bAmp
+    + octave((x - seedOff * 19) * dFreq, (z + seedOff * 17) * dFreq, 2, 2, 0.5) * dAmp;
+
+  const terrainArchetype = p && p.terrainArchetype ? p.terrainArchetype : 'wild';
+
+  if (terrainArchetype === 'maze') {
+    const cell = 14;
+    const corridor = 3.3;
+    const lx = ((x % cell) + cell) % cell;
+    const lz = ((z % cell) + cell) % cell;
+    const gx = Math.floor(x / cell);
+    const gz = Math.floor(z / cell);
+    const vGate = hash(gx * 177 + gz * 313 + SEED * 0.13) > 0.35;
+    const hGate = hash(gx * 211 + gz * 271 + SEED * 0.17) > 0.35;
+    const nearVWall = lx < corridor || lx > cell - corridor;
+    const nearHWall = lz < corridor || lz > cell - corridor;
+    const wall = (nearVWall && !vGate) || (nearHWall && !hGate);
+    const baseFloor = -0.6 + octave(x * 0.035, z * 0.035, 2, 2, 0.5) * 0.8;
+    return wall ? 8.5 + octave(x * 0.1, z * 0.1, 2, 2, 0.5) * 1.5 : baseFloor;
+  }
+
+  if (terrainArchetype === 'skyPlatforms') {
+    if (x * x + z * z < 900) {
+      return 6 + octave(x * 0.08, z * 0.08, 2, 2, 0.5) * 1.8;
+    }
+    const n = octave(x * 0.018, z * 0.018, 2, 2, 0.5);
+    if (n < 0.46) return -120;
+    const plat = Math.floor((n - 0.46) * 18);
+    return 7 + plat * 2.2 + octave(x * 0.09, z * 0.09, 2, 2, 0.5) * 1.2;
+  }
+
+  if (terrainArchetype === 'archipelago') {
+    const n = octave(x * 0.013, z * 0.013, 3, 2, 0.5);
+    if (n < 0.45) return -9.5;
+    return (n - 0.45) * 24 + 0.5;
+  }
+
+  if (terrainArchetype === 'fracture') {
+    const rift = Math.abs(Math.sin((x + seedOff) * 0.028) * Math.cos((z - seedOff) * 0.028));
+    if (rift < 0.22) return -35;
+    val = val * 0.55 + rift * 18;
+  }
+
+  if (terrainArchetype === 'ridges') {
+    const ridge = Math.abs(Math.sin((x + seedOff) * 0.035) + Math.cos((z - seedOff) * 0.031));
+    val = Math.abs(val) * 1.2 + ridge * 8;
+  }
   
   // Floating Islands (Abyss)
-  if (['sky', 'heavens', 'void', 'chaos', 'warp', 'shadow'].includes(currentBiome)) {
+  if (terrainArchetype === 'wild' && ['sky', 'heavens', 'void', 'chaos', 'warp', 'shadow'].includes(currentBiome)) {
     // Force spawn island at (0,0) to prevent infinite falling loop
     if (x * x + z * z < 900) { // 30m radius safe zone
         return 5 + octave(x * 0.1, z * 0.1, 2, 2, 0.5) * 2;
@@ -51,7 +109,7 @@ function terrainH(x, z) {
     val = (n - 0.35) * 30;
   } 
   // Water Islands
-  else if (['pirate', 'ocean'].includes(currentBiome)) {
+  else if (terrainArchetype === 'wild' && ['pirate', 'ocean'].includes(currentBiome)) {
     const n = octave(x * 0.015, z * 0.015, 2, 2, 0.5);
     if (n < 0.4) return -8; // Sea floor / Water
     val = (n - 0.4) * 20 + 1;
@@ -73,6 +131,36 @@ function terrainH(x, z) {
     val = 0; 
   } else if (currentBiome === 'alien') {
     val = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 10 + octave(x*0.1, z*0.1, 2, 2, 0.5)*5;
+  }
+
+  const flatBiomes = ['cyber', 'steampunk', 'kitchen', 'toy', 'circus', 'asylum', 'library', 'lab', 'museum', 'clockwork'];
+  if (!flatBiomes.includes(currentBiome)) {
+    const d = Math.hypot(x, z);
+    const ring = Math.cos(d / layoutRadius);
+    if (layoutMode === 0) {
+      val += ring * layoutStrength;
+    } else if (layoutMode === 1) {
+      val += Math.max(0, 1 - d / (layoutRadius * 1.4)) * layoutStrength * 1.6;
+    } else if (layoutMode === 2) {
+      val -= Math.max(0, 1 - d / (layoutRadius * 1.2)) * layoutStrength * 1.2;
+    } else if (layoutMode === 3) {
+      val += Math.sin((x - z) / (layoutRadius * 0.75)) * layoutStrength * 0.9;
+    } else {
+      val += Math.abs(Math.sin(x / (layoutRadius * 0.55)) * Math.cos(z / (layoutRadius * 0.55))) * layoutStrength - layoutStrength * 0.45;
+    }
+  }
+
+  // Per-biome unique terrain signature layer.
+  if (p && !flatBiomes.includes(currentBiome)) {
+    if (p.terrainMode === 1) {
+      val = Math.abs(val) * 1.15;
+    } else if (p.terrainMode === 2) {
+      const step = Math.max(1, p.terrainStep || 3);
+      val = Math.floor(val / step) * step;
+    } else if (p.terrainMode === 3) {
+      val += Math.sin((x + seedOff) * (p.waveFreq || 0.03)) * (p.waveAmp || 1.5)
+        + Math.cos((z - seedOff) * (p.waveFreq || 0.03)) * (p.waveAmp || 1.5) * 0.7;
+    }
   }
   return val;
 }
@@ -236,6 +324,7 @@ var scTexCache = {};
 function getSceneryTex(type, col) {
   const k = type + '_' + col;
   if (scTexCache[k]) return scTexCache[k];
+  const baseType = type.includes('@') ? type.split('@')[0] : type;
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
@@ -243,7 +332,7 @@ function getSceneryTex(type, col) {
   const color = new THREE.Color(col);
   const base = '#' + color.getHexString();
 
-  if (type === 'tree') {
+  if (baseType === 'tree') {
     ctx.fillStyle = '#3a2010';
     ctx.fillRect(28, 40, 8, 24); // Trunk
     ctx.fillStyle = base;
@@ -254,7 +343,7 @@ function getSceneryTex(type, col) {
     ctx.beginPath();
     ctx.arc(32, 25, 15, 0, Math.PI * 2);
     ctx.fill();
-  } else if (type === 'pine') {
+  } else if (baseType === 'pine') {
     ctx.fillStyle = '#3a2010';
     ctx.fillRect(28, 50, 8, 14);
     ctx.fillStyle = base;
@@ -263,14 +352,14 @@ function getSceneryTex(type, col) {
     ctx.lineTo(55, 50);
     ctx.lineTo(9, 50);
     ctx.fill();
-  } else if (type === 'cactus') {
+  } else if (baseType === 'cactus') {
     ctx.fillStyle = base;
     ctx.fillRect(28, 10, 8, 54);
     ctx.fillRect(18, 25, 10, 6);
     ctx.fillRect(18, 15, 6, 10);
     ctx.fillRect(36, 35, 10, 6);
     ctx.fillRect(40, 25, 6, 10);
-  } else if (type === 'dead') {
+  } else if (baseType === 'dead') {
     ctx.strokeStyle = '#2a1a10';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -281,7 +370,7 @@ function getSceneryTex(type, col) {
     ctx.moveTo(32, 30);
     ctx.lineTo(50, 15);
     ctx.stroke();
-  } else if (type === 'rock') {
+  } else if (baseType === 'rock') {
     ctx.fillStyle = base;
     ctx.beginPath();
     ctx.moveTo(10, 60);
@@ -289,7 +378,7 @@ function getSceneryTex(type, col) {
     ctx.lineTo(50, 15);
     ctx.lineTo(55, 55);
     ctx.fill();
-  } else if (type === 'crystal') {
+  } else if (baseType === 'crystal') {
     ctx.fillStyle = base;
     ctx.beginPath();
     ctx.moveTo(32, 60);
@@ -303,13 +392,13 @@ function getSceneryTex(type, col) {
     ctx.lineTo(25, 30);
     ctx.lineTo(32, 5);
     ctx.fill();
-  } else if (type === 'pillar') {
+  } else if (baseType === 'pillar') {
     ctx.fillStyle = base;
     ctx.fillRect(20, 10, 24, 54);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fillRect(24, 10, 4, 54);
     ctx.fillRect(36, 10, 4, 54);
-  } else if (type === 'grass') {
+  } else if (baseType === 'grass') {
     ctx.fillStyle = base;
     for (let i = 0; i < 8; i++) {
       ctx.beginPath();
@@ -318,31 +407,31 @@ function getSceneryTex(type, col) {
       ctx.lineTo(14 + i * 6, 64);
       ctx.fill();
     }
-  } else if (type === 'tombstone') {
+  } else if (baseType === 'tombstone') {
     ctx.fillStyle = '#444';
     ctx.beginPath(); ctx.arc(32, 20, 14, Math.PI, 0); ctx.lineTo(46, 64); ctx.lineTo(18, 64); ctx.fill();
     ctx.fillStyle = '#333'; ctx.font = '10px Arial'; ctx.fillText('RIP', 22, 40);
-  } else if (type === 'crate') {
+  } else if (baseType === 'crate') {
     ctx.fillStyle = '#6a4a3a'; ctx.fillRect(10, 10, 44, 44);
     ctx.strokeStyle = '#4a3a2a'; ctx.lineWidth = 4; ctx.strokeRect(10, 10, 44, 44);
     ctx.beginPath(); ctx.moveTo(10, 10); ctx.lineTo(54, 54); ctx.moveTo(54, 10); ctx.lineTo(10, 54); ctx.stroke();
-  } else if (type === 'tech') {
+  } else if (baseType === 'tech') {
     ctx.fillStyle = '#111'; ctx.fillRect(20, 10, 24, 54);
     ctx.fillStyle = col; 
     ctx.fillRect(24, 15, 16, 4); ctx.fillRect(24, 25, 16, 4); ctx.fillRect(24, 45, 16, 4);
     ctx.fillRect(28, 10, 2, 54);
-  } else if (type === 'coral') {
+  } else if (baseType === 'coral') {
     ctx.fillStyle = base;
     ctx.beginPath(); ctx.moveTo(32, 64); 
     ctx.quadraticCurveTo(10, 40, 20, 10); ctx.quadraticCurveTo(40, 30, 32, 64); ctx.fill();
     ctx.beginPath(); ctx.moveTo(32, 64); 
     ctx.quadraticCurveTo(54, 40, 44, 15); ctx.quadraticCurveTo(24, 30, 32, 64); ctx.fill();
-  } else if (type === 'organic') {
+  } else if (baseType === 'organic') {
     ctx.fillStyle = '#442222'; ctx.beginPath(); ctx.arc(32, 40, 15, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = base; ctx.beginPath(); ctx.arc(32, 25, 20, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.arc(25, 20, 5, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(40, 28, 3, 0, Math.PI*2); ctx.fill();
-  } else if (type === 'mushroom') {
+  } else if (baseType === 'mushroom') {
     ctx.fillStyle = '#dddddd'; ctx.fillRect(28, 30, 8, 34);
     ctx.fillStyle = base; ctx.beginPath(); ctx.arc(32, 30, 22, Math.PI, 0); ctx.fill();
     ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(25, 25, 4, 0, Math.PI*2); ctx.fill();
@@ -586,5 +675,5 @@ function getWeaponTex(type, level) {
 
 // Export
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { hash, mix, noise2, octave, terrainH, setTerrainBiome, genTex, getSpTex, mkSprite, getSceneryTex, getWeaponTex };
+  module.exports = { hash, mix, noise2, octave, terrainH, setTerrainBiome, setTerrainBiomeProfile, genTex, getSpTex, mkSprite, getSceneryTex, getWeaponTex };
 }

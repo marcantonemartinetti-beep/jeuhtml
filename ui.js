@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════
 
 // ==================== HUD STATE ====================
-var hudState = { hp: 100, mp: 100, wep: '', score: 0, time: '0:00', dash: false, hit: false, special: false };
+var hudState = { hp: 100, wep: '', score: 0, time: '0:00', dash: false, hit: false, special: false };
 var hitFlash = 0;  // Duration of hit flash effect - decremented by game.js when player takes damage
 
 function getMobIcon(shape) {
@@ -44,25 +44,86 @@ function getMobIcon(shape) {
     doll: 'fa-solid fa-child-reaching',
     gear: 'fa-solid fa-gear',
     shade: 'fa-solid fa-user-secret',
-    beast: 'fa-solid fa-paw'
+    beast: 'fa-solid fa-paw',
+    // Nouvelles shapes ajoutées
+    windmill: 'fa-solid fa-wind',
+    scarecrow: 'fa-solid fa-person',
+    sack: 'fa-solid fa-sack-dollar',
+    scythe: 'fa-solid fa-sickle',
+    plow: 'fa-solid fa-tractor',
+    troll: 'fa-solid fa-skull',
+    werewolf: 'fa-solid fa-dog',
+    werewolf_beast: 'fa-solid fa-dog',
+    monkey: 'fa-solid fa-otter',
+    gorilla: 'fa-solid fa-otter',
+    frog: 'fa-solid fa-frog',
+    toad: 'fa-solid fa-frog',
+    crocodile: 'fa-solid fa-alligator',
+    hag: 'fa-solid fa-hat-witch',
+    penguin: 'fa-solid fa-fish',
+    mammoth: 'fa-solid fa-hippo',
+    yeti: 'fa-solid fa-snowman',
+    mummy: 'fa-solid fa-mummy',
+    vampire: 'fa-solid fa-vampire',
+    lich: 'fa-solid fa-skull',
+    banshee: 'fa-solid fa-ghost',
+    oni: 'fa-solid fa-mask',
+    demon: 'fa-solid fa-fire',
+    imp: 'fa-solid fa-fire',
+    ogre: 'fa-solid fa-person-military-pointing',
+    kappa: 'fa-solid fa-turtle',
+    tengu: 'fa-solid fa-crow',
+    dragon: 'fa-solid fa-dragon',
+    phoenix: 'fa-solid fa-fire-flame-curved',
+    cerberus: 'fa-solid fa-dog',
+    salamander: 'fa-solid fa-fire',
+    griffin: 'fa-solid fa-horse',
+    harpy: 'fa-solid fa-crow',
+    gargoyle: 'fa-solid fa-mask',
+    succubus: 'fa-solid fa-fire',
+    cactus: 'fa-solid fa-seedling',
+    stone_golem: 'fa-solid fa-cubes',
+    ice_golem: 'fa-solid fa-snowflake',
+    lava_golem: 'fa-solid fa-fire',
+    iron_golem: 'fa-solid fa-robot',
+    animated_armor: 'fa-solid fa-shield',
+    shadow: 'fa-solid fa-user-ninja',
+    leech: 'fa-solid fa-worm',
+    poltergeist: 'fa-solid fa-ghost',
+    jailer_ghost: 'fa-solid fa-ghost',
+    executioner: 'fa-solid fa-axe',
+    hellhound: 'fa-solid fa-dog',
+    chained_skeleton: 'fa-solid fa-skull',
+    violin: 'fa-solid fa-music',
+    guitar: 'fa-solid fa-music',
+    harp: 'fa-solid fa-music',
+    mutant: 'fa-solid fa-disease',
+    cyborg: 'fa-solid fa-robot',
+    xenomorph: 'fa-solid fa-spider',
+    voidling: 'fa-solid fa-user-secret',
+    voidbeast: 'fa-solid fa-paw',
+    voidmage: 'fa-solid fa-hat-wizard',
+    nightmare: 'fa-solid fa-horse',
+    fallen_angel: 'fa-solid fa-dove',
+    seraph: 'fa-solid fa-dove',
+    cherub: 'fa-solid fa-dove',
+    angel: 'fa-solid fa-dove',
+    pegasus: 'fa-solid fa-horse',
+    deep_one: 'fa-solid fa-fish',
+    fishman: 'fa-solid fa-fish',
+    pixie: 'fa-solid fa-wand-magic-sparkles'
   };
   return icons[shape] || 'fa-solid fa-skull';
 }
 
 // ==================== HUD UPDATE ====================
 function updHUD(dt) {
-  const chp = Math.ceil(GameState.pHP), cmp = Math.ceil(GameState.pMP);
+  const chp = Math.ceil(GameState.pHP);
 
   if (chp !== hudState.hp) {
     hudState.hp = chp;
     document.getElementById('hp-fill').style.width = Math.max(0, Math.min(100, GameState.pHP / GameState.pMaxHP * 100)) + '%';
     document.getElementById('hp-txt').textContent = chp;
-  }
-
-  if (cmp !== hudState.mp) {
-    hudState.mp = cmp;
-    document.getElementById('mp-fill').style.width = (GameState.pMP / GameState.pMaxMP * 100) + '%';
-    document.getElementById('mp-txt').textContent = cmp;
   }
 
   let wStats = '', wIcon = '';
@@ -242,9 +303,94 @@ window.confirmUpgrade = function() {
     }
 };
 
+function getActiveWeaponEntry() {
+  for (const key in WEAPONS) {
+    if (WEAPONS[key] && WEAPONS[key].active) return { key, wep: WEAPONS[key] };
+  }
+  return null;
+}
+
+function getWeaponPathUpgrades() {
+  const active = getActiveWeaponEntry();
+  if (!active) return [];
+
+  const key = active.key;
+  const w = active.wep;
+  if (!GameState.weaponPaths) GameState.weaponPaths = {};
+  if (!GameState.weaponPaths[key]) GameState.weaponPaths[key] = { power: 0, control: 0, chaos: 0 };
+
+  const st = GameState.weaponPaths[key];
+  const mk = (path, icon, name, descFn, applyFn) => ({
+    id: `path_${key}_${path}`,
+    name,
+    icon,
+    type: 'path',
+    req: () => (st[path] || 0) < 3,
+    scale: () => ({
+      desc: `${descFn()} (${(st[path] || 0) + 1}/3)`,
+      apply: () => {
+        applyFn();
+        st[path] = (st[path] || 0) + 1;
+      }
+    })
+  });
+
+  return [
+    mk(
+      'power',
+      'fa-solid fa-fire',
+      `Voie Puissance - ${key}`,
+      () => '+18% dégâts, impact renforcé',
+      () => {
+        w.pathPower = (w.pathPower || 0) + 1;
+        w.dmg *= 1.18;
+        w.stagger = (w.stagger || 0) + 0.25;
+        if (w.range) w.range *= 1.06;
+        if (w.speed) w.speed *= 1.05;
+      }
+    ),
+    mk(
+      'control',
+      'fa-solid fa-crosshairs',
+      `Voie Contrôle - ${key}`,
+      () => '-10% cooldown, trajectoire plus stable',
+      () => {
+        w.pathControl = (w.pathControl || 0) + 1;
+        w.maxCd *= 0.90;
+        if (w.homing !== undefined) w.homing += 0.22;
+        if (w.arc) w.arc = Math.min(Math.PI * 2, w.arc + 0.14);
+        if (w.spread) w.spread *= 0.9;
+      }
+    ),
+    mk(
+      'chaos',
+      'fa-solid fa-dice',
+      `Voie Chaos - ${key}`,
+      () => '+variance, multishot/effets secondaires',
+      () => {
+        w.pathChaos = (w.pathChaos || 0) + 1;
+        w.statusChance = (w.statusChance || 0) + 0.06;
+        if (w.count !== undefined) w.count += 1;
+        else if (w.blast !== undefined) w.blast += 0.8;
+        else if (w.arc !== undefined) w.arc = Math.min(Math.PI * 2, w.arc + 0.3);
+      }
+    )
+  ];
+}
+
+function canUseUpgrade(u) {
+  if (!u || !u.req) return true;
+  try {
+    // Some upgrades expect the current SCEPTER state as context.
+    return !!u.req(WEAPONS.SCEPTER);
+  } catch (e) {
+    return false;
+  }
+}
+
 function showLevelUp() {
   if (GameState.autoUpgrade) {
-    const pool = UPGRADES.filter(u => !u.req || u.req());
+    const pool = UPGRADES.filter(canUseUpgrade).concat(getWeaponPathUpgrades().filter(canUseUpgrade));
     if (pool.length > 0) {
       const uIdx = Math.floor(Math.random() * pool.length);
       const u = pool[uIdx];
@@ -288,7 +434,8 @@ function rerollUpgrades() {
   c.innerHTML = '';
   let pool = [];
   try {
-      pool = UPGRADES.filter(u => !u.req || u.req());
+      pool = UPGRADES.filter(canUseUpgrade);
+      pool = pool.concat(getWeaponPathUpgrades().filter(canUseUpgrade));
   } catch(e) { console.error("Upgrade filter error", e); pool = UPGRADES; }
 
   for (let i = 0; i < 3; i++) {
@@ -333,194 +480,816 @@ function rerollUpgrades() {
 }
 
 // ==================== SELECTION UI ====================
+function hydrateSaveDataForMenu() {
+  try {
+    const raw = localStorage.getItem('dw_save');
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+
+    GameState.saveData = { ...GameState.saveData, ...data };
+    if (!Array.isArray(GameState.saveData.unlockedClasses)) GameState.saveData.unlockedClasses = ['mage', 'knight'];
+    if (!Array.isArray(GameState.saveData.unlockedBiomes)) GameState.saveData.unlockedBiomes = ['plains'];
+    if (!GameState.saveData.unlockedClasses.includes('mage')) GameState.saveData.unlockedClasses.push('mage');
+    if (!GameState.saveData.unlockedBiomes.includes('plains')) GameState.saveData.unlockedBiomes.push('plains');
+    const money = typeof GameState.saveData.money === 'number' ? GameState.saveData.money : 0;
+    const gold = typeof GameState.saveData.gold === 'number' ? GameState.saveData.gold : 0;
+    const unified = Math.max(money, gold);
+    GameState.saveData.money = unified;
+    GameState.saveData.gold = unified;
+  } catch (e) {
+    console.warn('Menu save hydration failed:', e);
+  }
+}
+
+function getWeaponDataByClass(c) {
+  if (!c || !c.wep) return null;
+  const keyMap = {
+    scepter: 'SCEPTER', sword: 'SWORD', axe: 'AXE', bow: 'BOW', daggers: 'DAGGERS',
+    spear: 'SPEAR', hammer: 'HAMMER', boomerang: 'BOOMERANG', scythe: 'SCYTHE',
+    katana: 'KATANA', flail: 'FLAIL', gauntlets: 'GAUNTLETS', grimoire: 'GRIMOIRE',
+    whip: 'WHIP', cards: 'CARDS', pistol: 'PISTOL', trident: 'TRIDENT', rifle: 'RIFLE',
+    shuriken: 'SHURIKEN', void_staff: 'VOID_STAFF', fire_staff: 'FIRE_STAFF',
+    leaf_blade: 'LEAF_BLADE', potion: 'POTION', lute: 'LUTE', wrench: 'WRENCH',
+    javelin: 'JAVELIN', crossbow: 'CROSSBOW', runestone: 'RUNESTONE', rapier: 'RAPIER',
+    bomb: 'BOMB', totem: 'TOTEM', claws: 'CLAWS', mace: 'MACE', mirror: 'MIRROR',
+    revolver: 'REVOLVER', needles: 'NEEDLES', lightning_rod: 'LIGHTNING_ROD',
+    ice_bow: 'ICE_BOW', dagger_sac: 'DAGGER_SAC', drill: 'DRILL', star_globe: 'STAR_GLOBE',
+    cleaver: 'CLEAVER', balls: 'BALLS', greatsword: 'GREATSWORD', rock: 'ROCK',
+    blowgun: 'BLOWGUN', greatbow: 'GREATBOW', dark_blade: 'DARK_BLADE',
+    sun_staff: 'SUN_STAFF', hourglass: 'HOURGLASS'
+  };
+  const wKey = keyMap[c.wep];
+  return wKey && WEAPONS[wKey] ? WEAPONS[wKey] : null;
+}
+
 function initSelectionUI() {
-  const cl = document.getElementById('charList');
-  cl.innerHTML = '';
+  hydrateSaveDataForMenu();
+
+  // Initialize character grid
+  const charGrid = document.getElementById('charGrid');
+  if (!charGrid) return;
+  charGrid.innerHTML = '';
+  
   CLASSES.forEach((c, i) => {
     const el = document.createElement('div');
-    el.className = 'sel-card' + (i === GameState.selCharIdx ? ' selected' : '');
+    el.className = 'char-card' + (i === GameState.selCharIdx ? ' selected' : '');
     
     const isLocked = !GameState.saveData.unlockedClasses.includes(c.id);
-    if (isLocked) {
-      el.classList.add('locked');
-      el.title = c.unlockReq || "Verrouillé";
-    }
-
-    let ribHTML = '';
-    if (GameState.saveData.wins[c.id] && GameState.saveData.wins[c.id].length > 0) ribHTML = `<div class="card-ribbon">🏅</div>`;
-
-    el.innerHTML = `<div class="sel-icon"><i class="${c.icon}"></i></div><div class="sel-name">${c.name}</div>${ribHTML}`;
+    if (isLocked) el.classList.add('locked');
+    
+    // Create a canvas portrait
+    const canvas = document.createElement('canvas');
+    canvas.className = 'char-portrait';
+    canvas.width = 120;
+    canvas.height = 120;
+    el.appendChild(canvas);
+    
+    // Add character name
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'char-name-label';
+    nameLabel.textContent = c.name;
+    el.appendChild(nameLabel);
+    
+    // Render portrait to canvas
+    renderCharacterPortrait(canvas, c);
+    
     el.onclick = () => {
-      if (isLocked) return;
       if (window.event) window.event.stopPropagation();
       GameState.selCharIdx = i;
-      document.querySelectorAll('#charList .sel-card').forEach((x, j) => x.classList.toggle('selected', j === i));
+      document.querySelectorAll('.char-card').forEach((x, j) => x.classList.toggle('selected', j === i));
       updateSelectionInfo();
     };
-    cl.appendChild(el);
+    
+    charGrid.appendChild(el);
   });
 
-  const sl = document.getElementById('stageList');
-  sl.innerHTML = '';
+  // Force exact 1:1 card sizing to avoid CSS/grid overlap edge-cases.
+  syncCharGridSquareSizes();
+  requestAnimationFrame(syncCharGridSquareSizes);
+  if (!charGridResizeBound) {
+    charGridResizeBound = true;
+    window.addEventListener('resize', syncCharGridSquareSizes);
+  }
+  
+  // Initialize stage grid
+  const stageGrid = document.getElementById('stageGrid');
+  stageGrid.innerHTML = '';
+  
   BIOMES.forEach((b, i) => {
     const el = document.createElement('div');
     el.className = 'stage-card' + (i === GameState.selMapIdx ? ' selected' : '');
     
     const isLocked = !GameState.saveData.unlockedBiomes.includes(b.id);
-    if (isLocked) {
-      el.classList.add('locked');
-      el.title = b.unlockReq || "Verrouillé";
-    }
-
-    el.innerHTML = `<div class="stage-icon"><i class="${b.icon}"></i></div><div class="stage-name">${b.name}</div>`;
+    if (isLocked) el.classList.add('locked');
+    
+    el.innerHTML = `
+      <div class="stage-icon"><i class="${b.icon}"></i></div>
+      <div class="stage-name">${b.name}</div>
+    `;
+    
     el.onclick = () => {
       if (isLocked) return;
       if (window.event) window.event.stopPropagation();
       GameState.selMapIdx = i;
-      document.querySelectorAll('#stageList .stage-card').forEach((x, j) => x.classList.toggle('selected', j === i));
+      document.querySelectorAll('.stage-card').forEach((x, j) => x.classList.toggle('selected', j === i));
       updateSelectionInfo();
     };
-    sl.appendChild(el);
+    
+    stageGrid.appendChild(el);
   });
-
+  
   updateSelectionInfo();
+}
+
+let charGridResizeBound = false;
+function syncCharGridSquareSizes() {
+  const grid = document.getElementById('charGrid');
+  if (!grid) return;
+  const cards = grid.querySelectorAll('.char-card');
+  cards.forEach((card) => {
+    const w = Math.max(1, Math.floor(card.getBoundingClientRect().width));
+    card.style.height = `${w}px`;
+  });
+}
+
+function renderCharacterPortrait(canvas, classData) {
+  if (!canvas) return;
+  
+  // Clear previous THREE.js content
+  const parent = canvas.parentElement;
+  if (parent && parent._portraitRenderer) {
+    try { parent._portraitRenderer.dispose(); } catch(e) {}
+  }
+  
+  // Create THREE.js scene for portrait
+  const scene = new THREE.Scene();
+  scene.background = null;
+  
+  const width = canvas.width || 120;
+  const height = canvas.height || 120;
+  
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  camera.position.set(0, 1.2, 2.5);
+  camera.lookAt(0, 0.8, 0);
+  
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(width, height, false);
+  
+  // Lighting
+  const ambLight = new THREE.AmbientLight(0xffffff, 0.7);
+  scene.add(ambLight);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(1.5, 2, 2);
+  scene.add(dirLight);
+  
+  // Build player model
+  const pm = (typeof buildPlayerModel === 'function') ? buildPlayerModel(classData) : null;
+  if (pm && pm.root) {
+    const group = pm.root;
+    const box = new THREE.Box3().setFromObject(group);
+    const center = box.getCenter(new THREE.Vector3());
+    group.position.sub(center);
+    group.scale.setScalar(1.2);
+    scene.add(group);
+    
+    // Render portrait once
+    renderer.render(scene, camera);
+  }
+  
+  // Store renderer for disposal
+  if (parent) parent._portraitRenderer = renderer;
 }
 
 function updateSelectionInfo() {
   const c = CLASSES[GameState.selCharIdx];
-  const p = document.getElementById('charInfo');
-  const wins = GameState.saveData.wins[c.id] || [];
-  const totalBiomes = BIOMES.length;
-  
-  let ribs = '';
-  wins.forEach(w => {
-    const b = BIOMES.find(x => x.id === w);
-    if (b) ribs += `<div title="${b.name}" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#222;border:1px solid #444;border-radius:3px;color:#ffd700;font-size:11px;cursor:help;"><i class="${b.icon}"></i></div>`;
-  });
-  if (ribs === '') ribs = '<div style="font-size:10px;color:#666;text-align:center;width:100%;padding:5px;">Aucune victoire</div>';
-
-  let wep = null;
-  switch (c.wep) {
-    case 'scepter': wep = WEAPONS.SCEPTER; break;
-    case 'sword': wep = WEAPONS.SWORD; break;
-    case 'axe': wep = WEAPONS.AXE; break;
-    case 'bow': wep = WEAPONS.BOW; break;
-    case 'daggers': wep = WEAPONS.DAGGERS; break;
-    case 'spear': wep = WEAPONS.SPEAR; break;
-    case 'hammer': wep = WEAPONS.HAMMER; break;
-    case 'boomerang': wep = WEAPONS.BOOMERANG; break;
-    case 'scythe': wep = WEAPONS.SCYTHE; break;
-    case 'katana': wep = WEAPONS.KATANA; break;
-    case 'flail': wep = WEAPONS.FLAIL; break;
-    case 'gauntlets': wep = WEAPONS.GAUNTLETS; break;
-    case 'grimoire': wep = WEAPONS.GRIMOIRE; break;
-    case 'whip': wep = WEAPONS.WHIP; break;
-    case 'cards': wep = WEAPONS.CARDS; break;
-    case 'pistol': wep = WEAPONS.PISTOL; break;
-    case 'trident': wep = WEAPONS.TRIDENT; break;
-    case 'rifle': wep = WEAPONS.RIFLE; break;
-    case 'shuriken': wep = WEAPONS.SHURIKEN; break;
-    case 'void_staff': wep = WEAPONS.VOID_STAFF; break;
-    case 'fire_staff': wep = WEAPONS.FIRE_STAFF; break;
-    case 'leaf_blade': wep = WEAPONS.LEAF_BLADE; break;
-    case 'potion': wep = WEAPONS.POTION; break;
-    case 'lute': wep = WEAPONS.LUTE; break;
-    case 'wrench': wep = WEAPONS.WRENCH; break;
-    case 'javelin': wep = WEAPONS.JAVELIN; break;
-    case 'crossbow': wep = WEAPONS.CROSSBOW; break;
-    case 'runestone': wep = WEAPONS.RUNESTONE; break;
-    case 'rapier': wep = WEAPONS.RAPIER; break;
-    case 'bomb': wep = WEAPONS.BOMB; break;
-    case 'totem': wep = WEAPONS.TOTEM; break;
-    case 'claws': wep = WEAPONS.CLAWS; break;
-    case 'mace': wep = WEAPONS.MACE; break;
-    case 'mirror': wep = WEAPONS.MIRROR; break;
-    case 'revolver': wep = WEAPONS.REVOLVER; break;
-    case 'needles': wep = WEAPONS.NEEDLES; break;
-    case 'lightning_rod': wep = WEAPONS.LIGHTNING_ROD; break;
-    case 'ice_bow': wep = WEAPONS.ICE_BOW; break;
-    case 'dagger_sac': wep = WEAPONS.DAGGER_SAC; break;
-    case 'drill': wep = WEAPONS.DRILL; break;
-    case 'star_globe': wep = WEAPONS.STAR_GLOBE; break;
-    case 'cleaver': wep = WEAPONS.CLEAVER; break;
-    case 'balls': wep = WEAPONS.BALLS; break;
-    case 'greatsword': wep = WEAPONS.GREATSWORD; break;
-    case 'rock': wep = WEAPONS.ROCK; break;
-    case 'blowgun': wep = WEAPONS.BLOWGUN; break;
-    case 'greatbow': wep = WEAPONS.GREATBOW; break;
-    case 'dark_blade': wep = WEAPONS.DARK_BLADE; break;
-    case 'sun_staff': wep = WEAPONS.SUN_STAFF; break;
-    case 'hourglass': wep = WEAPONS.HOURGLASS; break;
-  }
-
-  if (!wep) {
-    console.warn("Weapon not found for class:", c.name);
-    wep = WEAPONS.SCEPTER;
-  }
-
-  p.innerHTML = `
-    <div class="c-icon"><i class="${c.icon}"></i></div>
-    <div class="c-name">${c.name}</div>
-    <div class="c-desc">${c.desc}</div>
-    
-    <div class="c-stats" style="width:100%;margin-top:10px;background:rgba(0,0,0,.3);padding:8px;border-radius:4px;">
-      <div class="stat-row"><span><i class="fa-solid fa-heart"></i> Santé</span><span class="stat-val">${c.hp}</span></div>
-      <div class="stat-row"><span><i class="fa-solid fa-person-running"></i> Vitesse</span><span class="stat-val">${c.spd}</span></div>
-    </div>
-
-    ${c.special ? `
-    <div class="c-stats" style="width:100%;margin-top:5px;background:rgba(50,50,100,.3);padding:8px;border-radius:4px;">
-      <div style="font-size:10px;color:#aaa;margin-bottom:2px;">SPÉCIAL (Clic Droit)</div>
-      <div style="font-weight:bold;color:#fff;">${c.special.name}</div>
-      <div style="font-size:10px;color:#ccc;">${c.special.desc}</div>
-      <div style="font-size:10px;color:#88aaff;margin-top:2px;">Coût: ${c.special.cost} MP · CD: ${c.special.cd}s</div>
-    </div>` : ''}
-
-    <div class="wep-info" style="width:100%;margin-top:10px;">
-      <div class="wep-name"><i class="${wep.icon}"></i> ${c.wep.toUpperCase()}</div>
-      <div class="wep-stat"><span>Dégâts</span><span>${wep.dmg}</span></div>
-      <div class="wep-stat"><span>Cadence</span><span>${(1 / wep.maxCd).toFixed(1)}/s</span></div>
-      ${wep.range ? `<div class="wep-stat"><span>Portée</span><span>${wep.range}m</span></div>` : ''}
-      ${wep.speed ? `<div class="wep-stat"><span>Vitesse</span><span>${wep.speed}</span></div>` : ''}
-      ${wep.count > 1 ? `<div class="wep-stat"><span>Proj.</span><span>x${wep.count}</span></div>` : ''}
-    </div>
-
-    <div class="ribbons-container" style="margin-top:auto;width:100%;border-top:1px solid #333;padding-top:8px;">
-        <div style="font-size:10px;color:#888;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
-            <span>STAGES BATTUS</span>
-            <span style="color:#ccc;font-weight:bold;">${wins.length} / ${totalBiomes}</span>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:3px;max-height:80px;overflow-y:auto;padding-right:2px;align-content:flex-start;">
-            ${ribs}
-        </div>
-    </div>
-  `;
-
-  // Extra Info
-  const ex = document.getElementById('extraInfo');
   const b = BIOMES[GameState.selMapIdx];
-  const diffCol = b.diff <= 1.5 ? '#88ff88' : (b.diff <= 3 ? '#ffff88' : '#ff8888');
-  const mobList = b.mobs.slice(0, 8).map(m => `<div style="width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">• ${m}</div>`).join('');
+  if (!c || !b) return;
+  const isCharLocked = !GameState.saveData.unlockedClasses.includes(c.id);
+  
+  // Update character preview info
+  document.getElementById('previewCharName').textContent = c.name;
+  document.getElementById('previewCharDesc').textContent = c.desc;
+  document.getElementById('pCharHP').textContent = c.hp;
+  document.getElementById('pCharSpd').textContent = c.spd;
+  
+  // Get weapon info
+  const wep = getWeaponDataByClass(c) || WEAPONS.SCEPTER;
+  document.getElementById('pWeaponName').textContent = c.wep.toUpperCase();
+  const wepStats = document.getElementById('pWeaponStats');
+  const miniWeapon = document.getElementById('pCharMiniWeapon');
+  const miniAbility = document.getElementById('pCharMiniAbility');
+  if (wepStats) {
+    wepStats.textContent = `DMG: ${wep.dmg ?? '--'} | CD: ${wep.maxCd ?? '--'}s`;
+  }
+  if (miniWeapon) {
+    miniWeapon.textContent = `Arme: ${c.wep ? c.wep.toUpperCase() : '--'}`;
+  }
+  
+  // Render weapon model
+  renderWeaponPreview(c);
 
-  ex.innerHTML = `
-    <h3><i class="${b.icon}"></i> ${b.name.toUpperCase()}</h3>
-    
-    <div class="stat-row"><span>Difficulté</span><span class="stat-val" style="color:${diffCol}">x${b.diff}</span></div>
-    <div class="stat-row"><span>XP Bonus</span><span class="stat-val">+${Math.round((b.diff - 1) * 100)}%</span></div>
-    <div class="stat-row"><span>Densité</span><span class="stat-val">${b.diff > 3 ? 'Élevée' : 'Moyenne'}</span></div>
-    
-    <div style="margin-top:15px;border-top:1px solid #3a2a1a;padding-top:5px;">
-      <div style="font-size:10px;color:#8a7a5a;margin-bottom:5px;text-align:center;letter-spacing:1px;">MENACES LOCALES</div>
-      <div style="display:flex;flex-wrap:wrap;gap:2px;font-size:9px;color:#aaa;">
-        ${mobList}
-      </div>
-    </div>
-    
-    <div style="margin-top:auto;text-align:center;font-size:10px;color:#665544;font-style:italic;">
-      "Survivre ici relève de l'exploit."
-    </div>
-  `;
+  // Ability block
+  const abilityName = document.getElementById('pAbilityName');
+  const abilityDesc = document.getElementById('pAbilityDesc');
+  const abilityIcon = document.getElementById('pAbilityIcon');
+  if (abilityName && abilityDesc) {
+    if (c.special) {
+      abilityName.textContent = `${c.special.name} (${c.special.cd}s)`;
+      abilityDesc.textContent = c.special.desc;
+      if (abilityIcon) abilityIcon.className = c.special.icon || 'fa-solid fa-star';
+      if (miniAbility) miniAbility.textContent = `Capacite: ${c.special.name}`;
+    } else {
+      abilityName.textContent = 'Aucune capacité';
+      abilityDesc.textContent = 'Ce personnage n\'a pas de capacité active.';
+      if (abilityIcon) abilityIcon.className = 'fa-solid fa-ban';
+      if (miniAbility) miniAbility.textContent = 'Capacite: Aucune';
+    }
+  }
+  
+  // Show/hide unlock condition
+  const unlockDiv = document.getElementById('unlockCondition');
+  const unlockText = document.getElementById('unlockText');
+  const charModelBlock = document.getElementById('charModelBlock');
+  if (isCharLocked) {
+    unlockDiv.style.display = 'flex';
+    if (charModelBlock) charModelBlock.classList.add('is-locked');
+    if (c.unlockReq) {
+      unlockText.textContent = `Condition de deblocage: ${c.unlockReq}`;
+    } else if (c.linkedBiome) {
+      const linkedBiome = (typeof BIOMES !== 'undefined' && Array.isArray(BIOMES))
+        ? BIOMES.find((x) => x.id === c.linkedBiome)
+        : null;
+      unlockText.textContent = linkedBiome
+        ? `Condition de deblocage: Vaincre le boss de ${linkedBiome.name}`
+        : 'Condition de deblocage: Vaincre le boss du biome lie';
+    } else if (c.shopPrice) {
+      unlockText.textContent = `Condition de deblocage: Acheter en boutique (${c.shopPrice.toLocaleString()} or)`;
+    } else {
+      unlockText.textContent = 'Condition de deblocage: Verrouille';
+    }
+  } else {
+    unlockDiv.style.display = 'none';
+    if (charModelBlock) charModelBlock.classList.remove('is-locked');
+  }
+  
+  // Update stage preview info
+  document.getElementById('previewStageName').textContent = b.name;
+  document.getElementById('previewStageDesc').textContent = b.desc || 'Un lieu mystérieux et dangereux';
+  const diffCol = b.diff <= 1.5 ? '#88ff88' : (b.diff <= 3 ? '#ffff88' : '#ff8888');
+  document.getElementById('pStageDiff').innerHTML = `<span style="color:${diffCol}">x${b.diff}</span>`;
+  document.getElementById('pStageXP').textContent = `+${Math.round((b.diff - 1) * 100)}%`;
+  const stageBoss = BIOMES[GameState.selMapIdx].boss || 'Inconnu';
+  document.getElementById('pStageBoss').textContent = stageBoss;
+  document.getElementById('pStageMobs').textContent = `${(b.mobs || []).length} types`;
+  
+  // TODO: Render 3D previews (will need Three.js scene setup)
+  renderCharacterPreview(c);
+  renderStagePreview(b);
 }
+
+// ==================== 3D PREVIEW RENDERING ====================
+let previewScenes = { char: null, stage: null };
+let previewCameras = { char: null, stage: null };
+let previewRenderers = { char: null, stage: null };
+let previewModels = { char: null, stage: null };
+let previewAnimStarted = false;
+let previewStageCamRig = { baseY: 9.6, targetY: 0.8, targetZ: -4.5, radius: 7.5 };
+
+function resizePreviewCanvases() {
+  const charContainer = document.getElementById('charPreviewCanvas');
+  const stageContainer = document.getElementById('stagePreviewCanvas');
+
+  if (previewRenderers.char && previewCameras.char && charContainer) {
+    const w = Math.max(1, charContainer.clientWidth);
+    const h = Math.max(1, charContainer.clientHeight);
+    previewRenderers.char.setSize(w, h, false);
+    previewCameras.char.aspect = w / h;
+    previewCameras.char.updateProjectionMatrix();
+  }
+
+  if (previewRenderers.stage && previewCameras.stage && stageContainer) {
+    const w = Math.max(1, stageContainer.clientWidth);
+    const h = Math.max(1, stageContainer.clientHeight);
+    previewRenderers.stage.setSize(w, h, false);
+    previewCameras.stage.aspect = w / h;
+    previewCameras.stage.updateProjectionMatrix();
+  }
+}
+
+function animatePreviewScenes() {
+  if (GameState.gameRunning) return;
+
+  if (previewModels.char) {
+    previewModels.char.rotation.y += 0.01;
+  }
+
+  if (previewRenderers.char && previewScenes.char && previewCameras.char) {
+    previewRenderers.char.render(previewScenes.char, previewCameras.char);
+  }
+
+  if (previewRenderers.stage && previewScenes.stage && previewCameras.stage) {
+    // Overhead angled view with a subtle orbit for depth readability.
+    const t = performance.now() * 0.00022;
+    const radius = previewStageCamRig.radius;
+    const x = Math.sin(t) * radius;
+    const z = 5.8 + Math.cos(t) * 1.4;
+    const y = previewStageCamRig.baseY + Math.sin(t * 1.7) * 0.25;
+
+    previewCameras.stage.position.set(x, y, z);
+    previewCameras.stage.lookAt(0, previewStageCamRig.targetY, previewStageCamRig.targetZ);
+
+    previewRenderers.stage.render(previewScenes.stage, previewCameras.stage);
+  }
+
+  requestAnimationFrame(animatePreviewScenes);
+}
+
+function renderCharacterPreview(classData) {
+  const container = document.getElementById('charPreviewCanvas');
+  if (!container) return;
+  
+  // Initialize scene if needed
+  if (!previewScenes.char) {
+    previewScenes.char = new THREE.Scene();
+    previewScenes.char.background = null;
+    
+    previewCameras.char = new THREE.PerspectiveCamera(48, container.clientWidth / container.clientHeight, 0.1, 100);
+    previewCameras.char.position.set(0, 1.45, 3.9);
+    previewCameras.char.lookAt(0, 0.7, 0);
+    
+    const canvas = document.createElement('canvas');
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    container.appendChild(canvas);
+    
+    previewRenderers.char = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    previewRenderers.char.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    previewRenderers.char.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight), false);
+    
+    // Lighting
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
+    previewScenes.char.add(ambLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(2, 3, 2);
+    previewScenes.char.add(dirLight);
+  }
+  
+  // Clear previous model
+  while (previewScenes.char.children.length > 2) { // Keep lights
+    previewScenes.char.remove(previewScenes.char.children[2]);
+  }
+  
+  // Create real character model used in game
+  const pm = (typeof buildPlayerModel === 'function') ? buildPlayerModel(classData) : null;
+  const group = pm && pm.root ? pm.root : new THREE.Group();
+  const box = new THREE.Box3().setFromObject(group);
+  const center = box.getCenter(new THREE.Vector3());
+  group.position.sub(center);
+  group.scale.setScalar(1.08);
+  previewCameras.char.position.set(0, 1.45, 3.9);
+  previewCameras.char.lookAt(0, 0.7, 0);
+  previewScenes.char.add(group);
+  previewModels.char = group;
+
+  resizePreviewCanvases();
+  if (!previewAnimStarted) {
+    previewAnimStarted = true;
+    requestAnimationFrame(animatePreviewScenes);
+    window.addEventListener('resize', resizePreviewCanvases);
+  }
+}
+
+function renderStagePreview(biomeData) {
+  const container = document.getElementById('stagePreviewCanvas');
+  if (!container) return;
+
+  // Initialize scene if needed
+  if (!previewScenes.stage) {
+    previewScenes.stage = new THREE.Scene();
+    previewScenes.stage.background = null;
+
+    previewCameras.stage = new THREE.PerspectiveCamera(68, container.clientWidth / container.clientHeight, 0.04, 250);
+    previewCameras.stage.position.set(0, 9.6, 6.6);
+    previewCameras.stage.lookAt(0, 0.8, -4.5);
+
+    const canvas = document.createElement('canvas');
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    container.appendChild(canvas);
+
+    previewRenderers.stage = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    previewRenderers.stage.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    previewRenderers.stage.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight), false);
+
+    // Lighting close to game readability (ambient + directional key light)
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.55);
+    previewScenes.stage.add(ambLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    dirLight.position.set(4, 7, 3);
+    previewScenes.stage.add(dirLight);
+  }
+
+  const fogCol = biomeData.fog || 0x7ab0d8;
+  // Wider fog range in preview so tall/rough biomes remain readable from overhead camera.
+  previewScenes.stage.fog = new THREE.Fog(fogCol, 14, 90);
+  if (previewRenderers.stage) previewRenderers.stage.setClearColor(fogCol, 1);
+
+  // Clear previous terrain / props / mobs while keeping lights.
+  while (previewScenes.stage.children.length > 2) {
+    previewScenes.stage.remove(previewScenes.stage.children[2]);
+  }
+
+  // Initialize terrain biome profile to use the REAL terrain generation
+  const biomeFx = typeof getBiomeProfile === 'function' ? getBiomeProfile(biomeData) : null;
+  if (typeof setTerrainBiomeProfile === 'function' && biomeFx) {
+    setTerrainBiomeProfile(biomeFx);
+  }
+
+  // Adapt camera height to actual biome relief so no stage gets hidden under terrain/fog.
+  if (typeof terrainH === 'function') {
+    let minH = Infinity;
+    let maxH = -Infinity;
+    for (let sx = -24; sx <= 24; sx += 6) {
+      for (let sz = -24; sz <= 24; sz += 6) {
+        const h = terrainH(sx, sz);
+        if (h < minH) minH = h;
+        if (h > maxH) maxH = h;
+      }
+    }
+    const relief = Math.max(1, maxH - minH);
+    previewStageCamRig.baseY = Math.max(11, Math.min(30, maxH + 8 + relief * 0.28));
+    previewStageCamRig.targetY = minH + 1.8;
+    previewStageCamRig.targetZ = -4.5;
+    previewStageCamRig.radius = Math.max(8, Math.min(16, 8 + relief * 0.18));
+
+    if (previewCameras.stage) {
+      previewCameras.stage.position.set(0, previewStageCamRig.baseY, 6.6);
+      previewCameras.stage.lookAt(0, previewStageCamRig.targetY, previewStageCamRig.targetZ);
+    }
+  }
+
+  const g = new THREE.Group();
+  const biomeId = (biomeData.id || '').toLowerCase();
+  
+  // Create REAL terrain chunk using game's terrainH function
+  const CHUNK_SZ = 60;
+  const S = 32;
+  const groundGeo = new THREE.PlaneGeometry(CHUNK_SZ, CHUNK_SZ, S, S);
+  groundGeo.rotateX(-Math.PI / 2);
+  const pos = groundGeo.attributes.position.array;
+  
+  const colorCount = (S + 1) * (S + 1);
+  const cols = new Float32Array(colorCount * 3);
+  let colIdx = 0;
+  
+  // Use REAL terrain height function from game
+  if (typeof terrainH === 'function' && typeof noise2 === 'function') {
+    for (let i = 0; i < pos.length; i += 3) {
+      const wx = pos[i], wz = pos[i + 2];
+      const h = terrainH(wx, wz);
+      pos[i + 1] = h;
+      const v = (h + 5) / 25 + noise2(wx * 0.2, wz * 0.2) * 0.1;
+      cols[colIdx++] = ((biomeData.col >> 16) & 255) / 255 * v;
+      cols[colIdx++] = ((biomeData.col >> 8) & 255) / 255 * v;
+      cols[colIdx++] = (biomeData.col & 255) / 255 * v;
+    }
+  }
+  
+  groundGeo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  groundGeo.computeVertexNormals();
+  
+  const ground = new THREE.Mesh(
+    groundGeo,
+    new THREE.MeshLambertMaterial({ vertexColors: true })
+  );
+  ground.receiveShadow = true;
+  g.add(ground);
+
+  // Water for Islands (same as game)
+  if (['pirate', 'ocean'].includes(biomeId)) {
+    const wGeo = new THREE.PlaneGeometry(CHUNK_SZ, CHUNK_SZ);
+    wGeo.rotateX(-Math.PI/2);
+    const wMat = new THREE.MeshBasicMaterial({color: 0x004488, transparent:true, opacity:0.7});
+    const water = new THREE.Mesh(wGeo, wMat);
+    water.position.y = -2;
+    g.add(water);
+  }
+  
+  // Ceiling for Indoors (same as game)
+  if (['dungeon', 'crypt', 'mine', 'sewer', 'lab', 'library', 'museum', 'asylum', 'kitchen', 'core'].includes(biomeId)) {
+    const cGeo = new THREE.PlaneGeometry(CHUNK_SZ, CHUNK_SZ);
+    cGeo.rotateX(Math.PI/2);
+    const cMat = new THREE.MeshBasicMaterial({color: 0x111111});
+    const ceil = new THREE.Mesh(cGeo, cMat);
+    ceil.position.y = 30;
+    g.add(ceil);
+  }
+
+  // Generate REAL scenery using game's logic
+  if (biomeFx && typeof hash === 'function' && typeof getScenerySpriteMat === 'function') {
+    const cx = 0, cz = 0; // Center chunk
+    const biomeTreeMap = {
+      'plains': ['tree', 'tree'], 'farm': ['tree', 'crate'], 'desert': ['cactus', 'rock'], 'wildwest': ['cactus', 'crate'],
+      'forest': ['dead', 'tree'], 'jungle': ['organic', 'dead'], 'fairy': ['tree', 'mushroom'], 'hive': ['organic', 'mushroom'],
+      'snow': ['pine', 'rock'], 'storm': ['pine', 'dead'], 'swamp': ['dead', 'organic'], 'graveyard': ['tombstone', 'dead'],
+      'magma': ['rock', 'crystal'], 'volcano': ['rock', 'crystal'], 'ocean': ['coral', 'rock'], 'pirate': ['coral', 'crate'],
+      'samurai': ['pillar', 'tree'], 'dungeon': ['pillar', 'pillar'], 'void': ['crystal', 'crystal'], 'cyber': ['tech', 'tech']
+    };
+    const biomeRockMap = {
+      'plains': ['rock', 'rock'], 'farm': ['rock', 'rock'], 'desert': ['rock', 'rock'], 'wildwest': ['rock', 'crate'],
+      'forest': ['rock', 'organic'], 'jungle': ['organic', 'organic'], 'fairy': ['mushroom', 'crystal'],
+      'snow': ['crystal', 'crystal'], 'magma': ['crystal', 'rock'], 'ocean': ['rock', 'coral'], 'pirate': ['crate', 'rock'],
+      'samurai': ['pillar', 'rock'], 'dungeon': ['pillar', 'pillar'], 'void': ['crystal', 'crystal'], 'cyber': ['pillar', 'tech']
+    };
+
+    const treeOpts = biomeTreeMap[biomeId] || ['tree', 'rock'];
+    const rockOpts = biomeRockMap[biomeId] || ['rock', 'crystal'];
+
+    const c = new THREE.Color(biomeData.col);
+    const treeCol1 = new THREE.Color(c).offsetHSL(0.08, 0.15, 0.02).getHex();
+    const treeCol2 = new THREE.Color(c).offsetHSL(-0.05, 0.08, -0.05).getHex();
+    const rockCol1 = new THREE.Color(biomeData.fog).offsetHSL(-0.04, -0.1, -0.15).getHex();
+    const rockCol2 = new THREE.Color(biomeData.fog).offsetHSL(0.02, 0.05, 0.1).getHex();
+
+    const tMat1 = getScenerySpriteMat(`${treeOpts[0]}@${biomeId}`, treeCol1);
+    const tMat2 = getScenerySpriteMat(`${treeOpts[1]}@${biomeId}`, treeCol2);
+    const rMat1 = getScenerySpriteMat(`${rockOpts[0]}@${biomeId}`, rockCol1);
+    const rMat2 = getScenerySpriteMat(`${rockOpts[1]}@${biomeId}`, rockCol2);
+
+    const indoorBiomes = ['dungeon', 'prison', 'mine', 'library', 'asylum', 'museum', 'lab', 'kitchen', 'crypt'];
+    const isIndoor = indoorBiomes.includes(biomeId) || (biomeFx.terrainArchetype === 'maze');
+    const treeFactor = isIndoor ? 0.15 : 1;
+    const rockFactor = isIndoor ? 0.45 : 1;
+
+    // Trees with EXACT same clustering logic as game
+    const treeCount = Math.floor(biomeFx.treeDensity * 1.05 * treeFactor);
+    for (let i = 0; i < treeCount; i++) {
+      const clusterIdx = Math.floor(i / 4);
+      const inCluster = i % 4;
+      const h1 = hash(cx * 0.07 + cz * 0.13 + clusterIdx * 11);
+      const h2 = hash(cx * 0.21 - cz * 0.09 + clusterIdx * 17);
+      let lx = (h1 - 0.5) * CHUNK_SZ * 0.85;
+      let lz = (h2 - 0.5) * CHUNK_SZ * 0.85;
+      if (inCluster > 0) {
+        const coff = hash(clusterIdx * 31 + inCluster);
+        lx += (coff - 0.5) * 12;
+        lz += (hash(clusterIdx * 37 + inCluster) - 0.5) * 12;
+      }
+      const h = terrainH(cx + lx, cz + lz);
+      const s = 5 + hash(i * 3) * 5;
+      const tMat = hash(i * 7) < 0.5 ? tMat1 : tMat2;
+      const sp = new THREE.Sprite(tMat);
+      sp.center.set(0.5, 0);
+      sp.position.set(lx, h, lz);
+      sp.scale.set(s, s, 1);
+      g.add(sp);
+    }
+
+    // Rocks with EXACT same clustering logic as game
+    const rockCount = Math.floor(biomeFx.rockDensity * 1.05 * rockFactor);
+    for (let i = 0; i < rockCount; i++) {
+      const clusterIdx = Math.floor(i / 3);
+      const inCluster = i % 3;
+      const h1 = hash(cx * 0.15 + cz * 0.08 + clusterIdx * 13);
+      const h2 = hash(cx * 0.11 - cz * 0.19 + clusterIdx * 23);
+      let lx = (h1 - 0.5) * CHUNK_SZ * 0.88;
+      let lz = (h2 - 0.5) * CHUNK_SZ * 0.88;
+      if (inCluster > 0) {
+        const coff = hash(clusterIdx * 29 + inCluster);
+        lx += (coff - 0.5) * 10;
+        lz += (hash(clusterIdx * 41 + inCluster) - 0.5) * 10;
+      }
+      const h = terrainH(cx + lx, cz + lz);
+      const s = 0.8 + hash(i * 2) * 2.2;
+      const rMat = hash(i * 5) < 0.5 ? rMat1 : rMat2;
+      const sp = new THREE.Sprite(rMat);
+      sp.center.set(0.5, 0);
+      sp.position.set(lx, h, lz);
+      sp.scale.set(s, s, 1);
+      g.add(sp);
+    }
+
+    // Add structures if buildStructure is available
+    if (typeof buildStructure === 'function') {
+      const structChance = 0.20;
+      const structCount = 2; // A couple structures for preview
+      for (let s = 0; s < structCount; s++) {
+        const seed4struct = hash(cx * 11 + cz * 13 + s * 17);
+        if (hash(seed4struct) > structChance) continue;
+        
+        const structX = (hash(seed4struct * 2.1) - 0.5) * CHUNK_SZ * 0.7;
+        const structZ = (hash(seed4struct * 3.3) - 0.5) * CHUNK_SZ * 0.7;
+        const h = terrainH(cx + structX, cz + structZ);
+        
+        const numStructTypes = Math.floor(hash(seed4struct * 7.1) * 3) + 0;
+        const structType = Math.min(2, numStructTypes);
+        
+        const structData = buildStructure(biomeId, structType, 0, 0, 0);
+        if (structData && structData.mesh) {
+          structData.mesh.position.set(structX, h, structZ);
+          g.add(structData.mesh);
+        }
+      }
+    }
+  }
+
+  // Enemies at various distances
+  if (Array.isArray(biomeData.mobs) && biomeData.mobs.length && typeof buildPuppet === 'function') {
+    const mobNames = biomeData.mobs;
+    for (let i = 0; i < Math.min(8, mobNames.length * 3); i++) {
+      const mobName = mobNames[i % mobNames.length];
+      const mt = Array.isArray(MTYPES) ? MTYPES.find((m) => m.name === mobName) : null;
+      if (!mt) continue;
+      const built = buildPuppet(mt);
+      if (!built || !built.g) continue;
+      const enemy = built.g;
+      
+      const angle = (i / 8) * Math.PI * 2;
+      const dist = 5 + (i % 3) * 3.5;
+      const ex = Math.sin(angle) * dist;
+      const ez = Math.cos(angle) * dist;
+      
+      enemy.position.set(ex, typeof terrainH === 'function' ? terrainH(ex, ez) + 1.05 : 1.05, -Math.abs(ez) - 2);
+      enemy.rotation.y = Math.atan2(ex, ez);
+      enemy.scale.setScalar(0.88 + (i % 2) * 0.15);
+      g.add(enemy);
+    }
+  }
+
+  previewScenes.stage.add(g);
+  previewModels.stage = g;
+  resizePreviewCanvases();
+}
+
+function renderWeaponPreview(classData) {
+  const weaponCanvas = document.getElementById('weaponModelCanvas');
+  if (!weaponCanvas) return;
+  
+  // Clear previous content
+  weaponCanvas.innerHTML = '';
+  
+  const wep = getWeaponDataByClass(classData) || WEAPONS.SCEPTER;
+  
+  // Create a mini THREE.js scene for weapon rendering
+  let weaponScene, weaponCamera, weaponRenderer, weaponModel;
+  
+  weaponScene = new THREE.Scene();
+  weaponScene.background = null;
+  
+  weaponCamera = new THREE.PerspectiveCamera(
+    45,
+    weaponCanvas.clientWidth / weaponCanvas.clientHeight,
+    0.1,
+    1000
+  );
+  weaponCamera.position.set(1.5, 0.5, 2);
+  weaponCamera.lookAt(0, 0.5, 0);
+  
+  const canvas = document.createElement('canvas');
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  weaponCanvas.appendChild(canvas);
+  
+  weaponRenderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  weaponRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  weaponRenderer.setSize(weaponCanvas.clientWidth, weaponCanvas.clientHeight, false);
+  
+  // Lighting
+  const ambLight = new THREE.AmbientLight(0xffffff, 0.7);
+  weaponScene.add(ambLight);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+  dirLight.position.set(2, 2, 3);
+  weaponScene.add(dirLight);
+  
+  // Build weapon model if available
+  if (typeof buildWeapon3D === 'function') {
+    const wepData = { type: classData.wep };
+    weaponModel = buildWeapon3D(wepData, 0.8) || null;
+    if (weaponModel) {
+      const box = new THREE.Box3().setFromObject(weaponModel);
+      const center = box.getCenter(new THREE.Vector3());
+      weaponModel.position.sub(center);
+      weaponScene.add(weaponModel);
+    }
+  }
+  
+  // Simple render
+  weaponRenderer.render(weaponScene, weaponCamera);
+  
+  // Add rotation animation
+  const animateWeapon = () => {
+    if (weaponModel) {
+      weaponModel.rotation.y += 0.03;
+      weaponModel.rotation.x += 0.01;
+    }
+    weaponRenderer.render(weaponScene, weaponCamera);
+    requestAnimationFrame(animateWeapon);
+  };
+  animateWeapon();
+}
+
+// ==================== RANDOM SELECTION ====================
+window.randomCharacter = function() {
+  const unlockedClasses = CLASSES.map((c, i) => ({ c, i })).filter(x => GameState.saveData.unlockedClasses.includes(x.c.id));
+  if (unlockedClasses.length === 0) return;
+  
+  const randomClass = unlockedClasses[Math.floor(Math.random() * unlockedClasses.length)];
+  GameState.selCharIdx = randomClass.i;
+  
+  document.querySelectorAll('.char-card').forEach((x, j) => x.classList.toggle('selected', j === randomClass.i));
+  updateSelectionInfo();
+  
+  addNotif(`🎲 ${randomClass.c.name} sélectionné !`, '#ffaa00');
+};
+
+window.randomStage = function() {
+  const unlockedBiomes = BIOMES.map((b, i) => ({ b, i })).filter(x => GameState.saveData.unlockedBiomes.includes(x.b.id));
+  if (unlockedBiomes.length === 0) return;
+  
+  const randomBiome = unlockedBiomes[Math.floor(Math.random() * unlockedBiomes.length)];
+  GameState.selMapIdx = randomBiome.i;
+  
+  document.querySelectorAll('.stage-card').forEach((x, j) => x.classList.toggle('selected', j === randomBiome.i));
+  updateSelectionInfo();
+  
+  addNotif(`🎲 ${randomBiome.b.name} sélectionné !`, '#ffaa00');
+};
+
+// ==================== THEME SHOP ====================
+window.openThemeShop = function() {
+  const shop = document.getElementById('themeShopUI');
+  const list = document.getElementById('themeShopList');
+  const mainSel = document.getElementById('mainSelection');
+  
+  if (!shop || !list) return;
+  
+  // Update currency display (unified money/gold balance)
+  const unifiedBalance = Math.max(
+    typeof GameState.saveData.money === 'number' ? GameState.saveData.money : 0,
+    typeof GameState.saveData.gold === 'number' ? GameState.saveData.gold : 0
+  );
+  document.getElementById('themeShopGold').textContent = unifiedBalance.toLocaleString();
+  
+  // Render themes
+  list.innerHTML = '';
+  const themes = getAllThemes();
+  
+  themes.forEach(theme => {
+    const isUnlocked = isThemeUnlocked(theme.id);
+    const isActive = currentTheme === theme.id;
+    
+    const card = document.createElement('div');
+    card.className = 'theme-card';
+    if (isUnlocked) card.classList.add('unlocked');
+    if (isActive) card.classList.add('active');
+    
+    let statusIcon = '<i class="fa-solid fa-lock"></i>';
+    let statusClass = 'locked';
+    if (isActive) {
+      statusIcon = '<i class="fa-solid fa-check"></i>';
+      statusClass = 'active';
+    } else if (isUnlocked) {
+      statusIcon = '<i class="fa-solid fa-unlock"></i>';
+      statusClass = 'unlocked';
+    }
+    
+    card.innerHTML = `
+      <div class="theme-status ${statusClass}">${statusIcon}</div>
+      <div class="theme-icon"><i class="${theme.icon}"></i></div>
+      <div class="theme-name">${theme.name}</div>
+      <div class="theme-desc">${theme.desc}</div>
+      <div class="theme-price">${theme.price === 0 ? 'GRATUIT' : theme.price.toLocaleString() + ' <i class="fa-solid fa-coins"></i>'}</div>
+    `;
+    
+    card.onclick = () => {
+      if (isActive) return;
+      
+      if (!isUnlocked) {
+        buyTheme(theme.id);
+        openThemeShop(); // Refresh
+      } else {
+        applyUITheme(theme.id);
+        openThemeShop(); // Refresh
+      }
+    };
+    
+    list.appendChild(card);
+  });
+  
+  mainSel.style.display = 'none';
+  shop.style.display = 'flex';
+};
+
+window.closeThemeShop = function() {
+  const shop = document.getElementById('themeShopUI');
+  const mainSel = document.getElementById('mainSelection');
+  
+  if (shop) shop.style.display = 'none';
+  if (mainSel) mainSel.style.display = 'grid';
+  resizePreviewCanvases();
+};
 
 // ==================== QUEST SYSTEM ====================
 function newQuest() {
@@ -1378,6 +2147,7 @@ window.switchMarketTab = function(tab) {
         </div>
         <div style="display:flex;gap:10px;margin-bottom:20px;">
             <button onclick="switchMarketTab('upgrades')" style="padding:10px 20px;background:${tab==='upgrades'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">AMÉLIORATIONS</button>
+            <button onclick="switchMarketTab('characters')" style="padding:10px 20px;background:${tab==='characters'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">PERSONNAGES</button>
             <button onclick="switchMarketTab('cosmetics')" style="padding:10px 20px;background:${tab==='cosmetics'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">COSMÉTIQUES</button>
             <button onclick="switchMarketTab('casino')" style="padding:10px 20px;background:${tab==='casino'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">CASINO</button>
         </div>
@@ -1387,6 +2157,7 @@ window.switchMarketTab = function(tab) {
     ui.innerHTML = html;
     
     if (tab === 'upgrades') renderUpgrades();
+    else if (tab === 'characters') renderCharacterShop();
     else if (tab === 'cosmetics') renderShop();
     else if (tab === 'casino') renderCasino();
 };
@@ -1493,6 +2264,71 @@ window.equipCosmetic = function(id) {
     // Update preview if gallery is open? Not needed as shop is modal.
 };
 
+// ==================== CHARACTER SHOP ====================
+window.renderCharacterShop = function() {
+    const ui = document.getElementById('marketContent');
+    const money = GameState.saveData.money || 0;
+    const unlocked = GameState.saveData.unlockedClasses || [];
+    
+    // Filter shop characters (those with shopPrice)
+    const shopChars = CLASSES.filter(c => c.shopPrice);
+    
+    let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:15px;width:100%;max-width:1200px;">`;
+    
+    shopChars.forEach(c => {
+        const isUnlocked = unlocked.includes(c.id);
+        const canBuy = !isUnlocked && money >= c.shopPrice;
+        
+        html += `
+            <div style="background:rgba(255,255,255,0.05);border:1px solid ${isUnlocked?'#00ff00':'#444'};border-radius:8px;padding:15px;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;min-height:280px;">
+                ${isUnlocked ? '<div style="position:absolute;top:8px;right:8px;color:#00ff00;font-size:20px;"><i class="fa-solid fa-check-circle"></i></div>' : ''}
+                <div style="font-size:48px;color:#eee;margin-bottom:10px;"><i class="${c.icon}"></i></div>
+                <div style="font-weight:bold;color:#fff;font-size:18px;margin-bottom:5px;">${c.name}</div>
+                <div style="font-size:11px;color:#888;margin-bottom:10px;">${c.desc}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;font-size:11px;color:#aaa;margin-bottom:10px;padding:10px;background:rgba(0,0,0,0.3);border-radius:4px;">
+                    <div><i class="fa-solid fa-heart"></i> PV: ${c.hp}</div>
+                    <div><i class="fa-solid fa-person-running"></i> Vit: ${c.spd}</div>
+                    <div><i class="fa-solid fa-arrow-up"></i> Saut: ${c.jump}</div>
+                    <div><i class="fa-solid fa-weight-hanging"></i> Poids: ${c.weight}</div>
+                </div>
+                <div style="font-size:10px;color:#ffaa00;margin-bottom:5px;"><i class="fa-solid fa-bolt"></i> ${c.special.name}</div>
+                <div style="font-size:9px;color:#666;margin-bottom:auto;">${c.special.desc}</div>
+                ${isUnlocked ? 
+                    `<button style="margin-top:10px;padding:10px 20px;background:#228822;color:#fff;border:none;border-radius:4px;font-weight:bold;cursor:default;width:100%;">DÉBLOQUÉ</button>` :
+                    `<button onclick="buyCharacter('${c.id}')" style="margin-top:10px;padding:10px 20px;background:${canBuy?'#d0a030':'#333'};color:${canBuy?'#000':'#666'};border:none;border-radius:4px;cursor:${canBuy?'pointer':'default'};font-weight:bold;width:100%;" ${!canBuy?'disabled':''}>
+                        <i class="fa-solid fa-coins"></i> ${c.shopPrice.toLocaleString()}
+                    </button>`
+                }
+            </div>
+        `;
+    });
+    
+    html += `</div>`;
+    html += `<div style="margin-top:20px;padding:15px;background:rgba(100,200,255,0.1);border:1px solid #4488ff;border-radius:8px;max-width:800px;text-align:center;">
+        <div style="color:#88ccff;font-weight:bold;margin-bottom:5px;"><i class="fa-solid fa-info-circle"></i> Comment gagner de l'or ?</div>
+        <div style="color:#aaa;font-size:12px;">Tuez des ennemis en partie pour gagner de l'or ! Plus vous tuez, plus vous gagnez.</div>
+    </div>`;
+    
+    ui.innerHTML = html;
+};
+
+window.buyCharacter = function(id) {
+    const c = CLASSES.find(x => x.id === id);
+    if (!c || !c.shopPrice) return;
+    
+    if (GameState.saveData.money >= c.shopPrice) {
+        GameState.saveData.money -= c.shopPrice;
+        if (!GameState.saveData.unlockedClasses) GameState.saveData.unlockedClasses = [];
+        if (!GameState.saveData.unlockedClasses.includes(id)) {
+            GameState.saveData.unlockedClasses.push(id);
+        }
+        localStorage.setItem('dw_save', JSON.stringify(GameState.saveData));
+        switchMarketTab('characters');
+        addNotif(`🎉 ${c.name} débloqué !`, '#00ff00');
+    }
+};
+
+// ==================== C
 // ==================== CASINO ====================
 window.renderCasino = function() {
     const ui = document.getElementById('marketContent');
@@ -1795,5 +2631,5 @@ window.gambleHL = function(choice) {
 
 // Export
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { updHUD, updateUpgradesHUD, addNotif, showLevelUp, rerollUpgrades, initSelectionUI, updateSelectionInfo, newQuest, updateQuest, updateQuestUI, openGallery, closeGallery, showGalCat, previewEntity, injectDOM, openUpgrades, closeUpgrades, renderUpgrades, buyUpgrade, openMarket, closeMarket, switchMarketTab, renderShop, buyCosmetic, equipCosmetic, openOptions, closeOptions, renderOptions, toggleSetting, renderCasino, gambleCoin, gambleSlots, gambleDice, gambleWheel, gambleHL };
+  module.exports = { updHUD, updateUpgradesHUD, addNotif, showLevelUp, rerollUpgrades, initSelectionUI, updateSelectionInfo, newQuest, updateQuest, updateQuestUI, openGallery, closeGallery, showGalCat, previewEntity, injectDOM, openUpgrades, closeUpgrades, renderUpgrades, buyUpgrade, openMarket, closeMarket, switchMarketTab, renderShop, buyCosmetic, equipCosmetic, renderCharacterShop, buyCharacter, openOptions, closeOptions, renderOptions, toggleSetting, renderCasino, gambleCoin, gambleSlots, gambleDice, gambleWheel, gambleHL };
 }
