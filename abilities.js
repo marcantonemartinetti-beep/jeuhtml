@@ -92,7 +92,7 @@ function spawnMeleeTelegraph(wep) {
   const areaMul = GameState.pArea || 1;
   const radius = Math.max(1.2, (wep.range || 3.0) * areaMul);
   const arc = Math.min(Math.PI * 2, Math.max(0.25, wep.arc || 1.2));
-  const start = camYaw - arc * 0.5;
+  const start = Math.PI / 2 + camYaw - arc * 0.5;
   const geom = new THREE.CircleGeometry(radius, Math.max(12, Math.floor(22 * arc / Math.PI)), start, arc);
   geom.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({ color: getWeaponFamilyColor(wep.key), transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
