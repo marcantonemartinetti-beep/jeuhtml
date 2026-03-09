@@ -13,6 +13,7 @@ var SPD = 7.5;
 var playerModel, playerParts, playerTypeData;
 var loadoutHaloRoot = null, loadoutHaloWeapons = null, loadoutHaloItems = null;
 var loadoutHaloRing = null, loadoutHaloSig = '';
+var loadoutHaloIconTexCache = {};
 
 // ==================== CONSTANTS ====================
 const CHUNK_SZ = 60;
@@ -98,12 +99,75 @@ function getLoadoutVisualSignature() {
   return `${mainSig}#${passSig}`;
 }
 
+function _getWeaponDefById(id) {
+  if (!id || !WEAPONS) return null;
+  const key = String(id).toUpperCase();
+  return WEAPONS[key] || null;
+}
+
+function _resolveFaGlyph(iconClass) {
+  if (typeof document === 'undefined' || !iconClass) return '\\uf059';
+  const probe = document.createElement('i');
+  probe.className = String(iconClass);
+  probe.style.position = 'absolute';
+  probe.style.left = '-9999px';
+  probe.style.top = '-9999px';
+  probe.style.opacity = '0';
+  probe.style.pointerEvents = 'none';
+  document.body.appendChild(probe);
+  let content = '';
+  try {
+    content = window.getComputedStyle(probe, '::before').content || '';
+  } catch (_) {
+    content = '';
+  }
+  probe.remove();
+  if (!content || content === 'none' || content === 'normal') return '\\uf059';
+  const cleaned = content.replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+  if (!cleaned) return '\\uf059';
+  if (/^\\[0-9a-fA-F]{1,6}$/.test(cleaned)) {
+    const cp = parseInt(cleaned.slice(1), 16);
+    if (Number.isFinite(cp)) return String.fromCodePoint(cp);
+  }
+  if (cleaned.length >= 1) return cleaned;
+  return '\\uf059';
+}
+
+function _getHaloIconTexture(iconClass) {
+  const key = String(iconClass || 'fa-solid fa-question');
+  if (loadoutHaloIconTexCache[key]) return loadoutHaloIconTexCache[key];
+  const glyph = _resolveFaGlyph(key);
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(0,0,0,0.38)';
+  ctx.beginPath();
+  ctx.arc(64, 64, 50, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = "900 78px 'Font Awesome 6 Free'";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(255, 170, 40, 0.85)';
+  ctx.shadowBlur = 10;
+  ctx.fillText(glyph, 64, 66);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  loadoutHaloIconTexCache[key] = tex;
+  return tex;
+}
+
 function ensureLoadoutHaloRoot() {
   if (!playerPivot) return;
   if (loadoutHaloRoot && loadoutHaloRoot.parent === playerPivot) return;
 
   loadoutHaloRoot = new THREE.Group();
-  loadoutHaloRoot.position.set(0, 2.85, 0);
+  loadoutHaloRoot.position.set(0, 1.25, 0);
   loadoutHaloRoot.visible = false;
   loadoutHaloRoot.renderOrder = 120;
   playerPivot.add(loadoutHaloRoot);
@@ -113,12 +177,7 @@ function ensureLoadoutHaloRoot() {
   loadoutHaloRoot.add(loadoutHaloWeapons);
   loadoutHaloRoot.add(loadoutHaloItems);
 
-  const ringGeo = new THREE.TorusGeometry(0.95, 0.045, 10, 40);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffc86a, transparent: true, opacity: 0.7, depthWrite: false });
-  loadoutHaloRing = new THREE.Mesh(ringGeo, ringMat);
-  loadoutHaloRing.rotation.x = Math.PI / 2;
-  loadoutHaloRing.position.y = 0;
-  loadoutHaloWeapons.add(loadoutHaloRing);
+  loadoutHaloRing = null;
 }
 
 function clearGroupChildren(group, keepFirstChild) {
@@ -147,7 +206,7 @@ function rebuildLoadoutHaloVisuals() {
     ? inv.passives.filter((p) => p && p.id)
     : [];
 
-  clearGroupChildren(loadoutHaloWeapons, true);
+  clearGroupChildren(loadoutHaloWeapons, false);
   clearGroupChildren(loadoutHaloItems, false);
 
   if (!weaponEntries.length && !passiveEntries.length) {
@@ -164,13 +223,13 @@ function rebuildLoadoutHaloVisuals() {
     const h = _loadoutVisualHash(we.id);
     const col = new THREE.Color().setHSL((h % 360) / 360, 0.75, 0.58);
 
-    const shapeType = h % 3;
-    const geo = shapeType === 0
-      ? new THREE.BoxGeometry(0.15, 0.15, 0.15)
-      : (shapeType === 1 ? new THREE.OctahedronGeometry(0.1, 0) : new THREE.ConeGeometry(0.11, 0.22, 8));
-    const mat = new THREE.MeshBasicMaterial({ color: col.getHex(), transparent: true, opacity: 0.95, depthWrite: false });
-    const marker = new THREE.Mesh(geo, mat);
+    const wDef = _getWeaponDefById(we.id);
+    const iconCls = (wDef && wDef.icon) ? wDef.icon : 'fa-solid fa-question';
+    const tex = _getHaloIconTexture(iconCls);
+    const mat = new THREE.SpriteMaterial({ map: tex, color: col.getHex(), transparent: true, opacity: 0.95, depthWrite: false, depthTest: true });
+    const marker = new THREE.Sprite(mat);
     marker.position.set(Math.cos(a) * wepRadius, 0, Math.sin(a) * wepRadius);
+    marker.scale.set(0.34, 0.34, 0.34);
     marker.userData.weaponId = we.id;
     marker.userData.spin = 1.6 + (h % 7) * 0.18;
     marker.userData.bob = 0.02 + (h % 3) * 0.008;
@@ -187,10 +246,12 @@ function rebuildLoadoutHaloVisuals() {
       ? new THREE.Color().setHSL((_loadoutVisualHash(def.statKey) % 360) / 360, 0.7, 0.6)
       : new THREE.Color().setHSL((h % 360) / 360, 0.6, 0.62);
 
-    const geo = new THREE.SphereGeometry(0.08, 8, 8);
-    const mat = new THREE.MeshBasicMaterial({ color: col.getHex(), transparent: true, opacity: 0.85, depthWrite: false });
-    const marker = new THREE.Mesh(geo, mat);
+    const iconCls = (def && def.icon) ? def.icon : 'fa-solid fa-circle';
+    const tex = _getHaloIconTexture(iconCls);
+    const mat = new THREE.SpriteMaterial({ map: tex, color: col.getHex(), transparent: true, opacity: 0.82, depthWrite: false, depthTest: true });
+    const marker = new THREE.Sprite(mat);
     marker.position.set(Math.cos(a) * itemRadius, 0.55, Math.sin(a) * itemRadius);
+    marker.scale.set(0.23, 0.23, 0.23);
     marker.userData.spin = -1.2 - (h % 5) * 0.16;
     marker.userData.bob = 0.018 + (h % 4) * 0.006;
     loadoutHaloItems.add(marker);
@@ -221,12 +282,27 @@ function updateLoadoutHaloVisuals(dt) {
   if (!loadoutHaloRoot) return;
 
   const sig = getLoadoutVisualSignature();
-  if (sig !== loadoutHaloSig) {
+  let forceRebuild = false;
+  if (loadoutHaloWeapons && loadoutHaloWeapons.children && loadoutHaloWeapons.children.length) {
+    for (let i = 0; i < loadoutHaloWeapons.children.length; i++) {
+      const c = loadoutHaloWeapons.children[i];
+      if (!c) continue;
+      // Legacy halo visuals used Mesh/Torus; new visuals must be Sprite-only.
+      if (c.isMesh || c.type === 'Mesh' || c.type === 'Group') {
+        forceRebuild = true;
+        break;
+      }
+    }
+  }
+  if (sig !== loadoutHaloSig || forceRebuild) {
     loadoutHaloSig = sig;
     rebuildLoadoutHaloVisuals();
   }
 
   if (!loadoutHaloRoot.visible) return;
+
+  const s = Math.max(0.8, (playerTypeData && playerTypeData.S) ? playerTypeData.S : 1.0);
+  loadoutHaloRoot.position.y = 1.2 * s;
 
   const t = GameState.pT || 0;
   if (loadoutHaloWeapons) {

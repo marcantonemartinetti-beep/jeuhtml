@@ -55,24 +55,46 @@ function getPlayerDmg(wep, targetDist = 0) {
 
 var meleeTelegraphs = [];
 
+function getMeleeFacingYaw() {
+  // In 3rd person, melee should follow the visible front of the character model.
+  if (GameState && GameState.thirdPerson && typeof playerModel !== 'undefined' && playerModel) {
+    return playerModel.rotation.y || 0;
+  }
+  // In 1st person, camera forward is the authoritative facing.
+  return camYaw;
+}
+
+function getMeleeAimDir2D() {
+  const yaw = getMeleeFacingYaw();
+  return new THREE.Vector2(Math.sin(yaw), Math.cos(yaw)).normalize();
+}
+
 function spawnMeleeTelegraph(wep, origin) {
   const pp = origin || playerPivot.position;
   const areaMul = GameState.pArea || 1;
   const radius = Math.max(1.2, (wep.range || 3.0) * areaMul);
   const arc = Math.min(Math.PI * 2, Math.max(0.25, wep.arc || 1.2));
-  const start = Math.PI / 2 + camYaw - arc * 0.5;
-  const geom = new THREE.CircleGeometry(radius, Math.max(12, Math.floor(22 * arc / Math.PI)), start, arc);
+  const facingYaw = getMeleeFacingYaw();
+  const geom = new THREE.CircleGeometry(radius, Math.max(12, Math.floor(22 * arc / Math.PI)), 0, arc);
   geom.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const mesh = new THREE.Mesh(geom, mat);
+  mesh.rotation.y = facingYaw - arc * 0.5;
   mesh.position.set(pp.x, terrainH(pp.x, pp.z) + 0.06, pp.z);
   scene.add(mesh);
-  meleeTelegraphs.push({ mesh, ttl: 0.14 });
+  meleeTelegraphs.push({ mesh, ttl: 0.14, arc, followCamera: true });
 }
 
 function updateMeleeTelegraphs(dt) {
   if (!meleeTelegraphs.length) return;
   meleeTelegraphs = meleeTelegraphs.filter(t => {
+    if (t.followCamera && t.mesh) {
+      const pp = playerPivot ? playerPivot.position : null;
+      if (pp) {
+        t.mesh.position.set(pp.x, terrainH(pp.x, pp.z) + 0.06, pp.z);
+      }
+      t.mesh.rotation.y = getMeleeFacingYaw() - (t.arc || 1.2) * 0.5;
+    }
     t.ttl -= dt;
     t.mesh.material.opacity = Math.max(0, t.ttl * 1.8);
     if (t.ttl <= 0) {
@@ -99,8 +121,8 @@ function useMelee(wep) {
     animateWeaponAttack(window.vmModel, wep);
   }
 
-  // Use camera yaw for 2D direction (more reliable for melee)
-  const aimDir = new THREE.Vector2(-Math.sin(camYaw), -Math.cos(camYaw));
+  // Use the same facing source as the telegraph so visual and damage zones match exactly.
+  const aimDir = getMeleeAimDir2D();
   let hit = false;
 
   monsters.forEach(m => {
@@ -116,8 +138,8 @@ function useMelee(wep) {
       const dirToM = new THREE.Vector2(dx, dz).normalize();
       const dot = aimDir.dot(dirToM);
       
-      // Hit if within arc OR very close (collision)
-      if (dist2d < 1.2 || (wep.arc >= Math.PI * 2 || dot > Math.cos(wep.arc / 2))) {
+      // Hit only inside displayed arc (or full-circle melee).
+      if (wep.arc >= Math.PI * 2 || dot > Math.cos(wep.arc / 2)) {
         let dmg = getPlayerDmg(wep, dist2d);
         const stagger = (GameState.pKnockback || 0) + (wep.stagger || 0) + (wep.pathPower || 0) * 0.35;
         m.takeDmg(dmg, false, stagger, pp);

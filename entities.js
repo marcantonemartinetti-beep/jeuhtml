@@ -1113,7 +1113,7 @@ function buildPuppet(T) {
     p.sun1 = mkSprite(0xffd700, 0.4 * S, 0.4 * S, 'circle'); p.sun1.position.set(-0.6 * S, 1.85 * S, 0.1); g.add(p.sun1);
     p.sun2 = mkSprite(0xffd700, 0.4 * S, 0.4 * S, 'circle'); p.sun2.position.set(0.6 * S, 1.85 * S, 0.1); g.add(p.sun2);
     p.head = mkSprite(SK, 0.6 * S, 0.6 * S, 'circle'); p.head.position.y = 2.35 * S; g.add(p.head);
-    p.halo = mkSprite(0xffd700, 0.9 * S, 0.15 * S, 'circle'); p.halo.position.y = 1.5 * S; p.halo.material.opacity = 0.18; p.halo.material.transparent = true; g.add(p.halo);
+    p.halo = mkSprite(0xffd700, 0.9 * S, 0.15 * S, 'circle'); p.halo.position.y = 2.9 * S; p.halo.material.opacity = 0.4; p.halo.material.transparent = true; g.add(p.halo);
     p.armLU = mkSprite(C, 0.25 * S, 0.6 * S); p.armLU.position.set(-0.7 * S, 1.9 * S, 0); g.add(p.armLU);
     p.armLD = mkSprite(SK, 0.23 * S, 0.5 * S); p.armLD.position.set(-0.7 * S, 1.3 * S, 0); g.add(p.armLD);
     p.armRU = mkSprite(C, 0.25 * S, 0.6 * S); p.armRU.position.set(0.7 * S, 1.9 * S, 0); g.add(p.armRU);

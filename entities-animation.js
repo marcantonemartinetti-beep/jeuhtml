@@ -211,9 +211,12 @@ function animPuppet(p, t, moving, S = 1, shape = 'human') {
     p.armR.rotation.z = -0.5 - Math.sin(t * 4) * 0.2;
   } else if (shape === 'slime_cube') {
     const sq = Math.sin(t * 4) * 0.1;
-    const h = 1.2 * S * (1 - sq);
-    p.torso.scale.set(1.2 * S * (1 + sq), h, 1);
-    p.torso.position.y = h / 2;
+    // Use relative squash/stretch factors; absolute scaling here would double-apply size and sink the slime.
+    const sy = 1 - sq;
+    const sx = 1 + sq;
+    p.torso.scale.set(sx, sy, 1);
+    p.torso.position.y = 0.6 * S * sy;
+    if (p.core) p.core.position.y = 0.6 * S * sy;
     p.core.rotation.z = t;
   } else if (shape === 'crystal_golem') {
     p.torso.position.y = 1.8 * S + bob;
