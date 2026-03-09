@@ -55,7 +55,7 @@ var GameState = {
   // Save data
   saveData: {
     wins: {},
-    unlockedClasses: ['mage', 'knight'],
+    unlockedClasses: ['mage', 'knight', 'barbarian', 'ranger', 'rogue'],
     unlockedBiomes: ['plains'],
     cards: [],
     cardStacks: {},
@@ -69,7 +69,7 @@ var GameState = {
     unlockedThemes: ['medieval'],
     selectedTheme: 'medieval',
     selectedBiomeId: 'plains',
-    normalUnlockTier: 0,
+    normalUnlockTier: 3,
     loadout: {
       mainWeapons: [null, null, null, null, null, null],
       autoWeapons: [],

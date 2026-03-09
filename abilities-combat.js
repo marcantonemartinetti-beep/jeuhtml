@@ -66,20 +66,40 @@ function getMeleeFacingYaw() {
 
 function getMeleeAimDir2D() {
   const yaw = getMeleeFacingYaw();
-  return new THREE.Vector2(Math.sin(yaw), Math.cos(yaw)).normalize();
+  // Keep melee aim aligned with the same world-forward convention as projectiles.
+  return new THREE.Vector2(-Math.sin(yaw), -Math.cos(yaw)).normalize();
+}
+
+function getMeleeOrigin() {
+  const pivot = (typeof playerPivot !== 'undefined' && playerPivot && playerPivot.position)
+    ? playerPivot.position
+    : new THREE.Vector3();
+  const s = (typeof playerTypeData !== 'undefined' && playerTypeData && playerTypeData.S) ? playerTypeData.S : 1.0;
+  const groundY = terrainH(pivot.x, pivot.z);
+  // Melee should always be centered on the character, not on a halo marker.
+  return new THREE.Vector3(pivot.x, groundY + 1.1 * s, pivot.z);
+}
+
+function getMeleeHitParams(wep) {
+  const areaMul = GameState.pArea || 1;
+  const radius = Math.max(0, (wep.range || 3.0) * areaMul);
+  const arcRaw = (typeof wep.arc === 'number') ? wep.arc : 1.2;
+  const arc = Math.max(0, Math.min(Math.PI * 2, arcRaw));
+  return { radius, arc };
 }
 
 function spawnMeleeTelegraph(wep, origin) {
   const pp = origin || playerPivot.position;
-  const areaMul = GameState.pArea || 1;
-  const radius = Math.max(1.2, (wep.range || 3.0) * areaMul);
-  const arc = Math.min(Math.PI * 2, Math.max(0.25, wep.arc || 1.2));
+  const params = getMeleeHitParams(wep);
+  const radius = params.radius;
+  const arc = params.arc;
   const facingYaw = getMeleeFacingYaw();
   const geom = new THREE.CircleGeometry(radius, Math.max(12, Math.floor(22 * arc / Math.PI)), 0, arc);
   geom.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const mesh = new THREE.Mesh(geom, mat);
-  mesh.rotation.y = facingYaw - arc * 0.5;
+  // CircleGeometry sectors are centered on +X by default, so offset to align with forward (-Z at yaw 0).
+  mesh.rotation.y = facingYaw - Math.PI * 0.5 - arc * 0.5;
   mesh.position.set(pp.x, terrainH(pp.x, pp.z) + 0.06, pp.z);
   scene.add(mesh);
   meleeTelegraphs.push({ mesh, ttl: 0.14, arc, followCamera: true });
@@ -93,7 +113,7 @@ function updateMeleeTelegraphs(dt) {
       if (pp) {
         t.mesh.position.set(pp.x, terrainH(pp.x, pp.z) + 0.06, pp.z);
       }
-      t.mesh.rotation.y = getMeleeFacingYaw() - (t.arc || 1.2) * 0.5;
+      t.mesh.rotation.y = getMeleeFacingYaw() - Math.PI * 0.5 - (t.arc || 1.2) * 0.5;
     }
     t.ttl -= dt;
     t.mesh.material.opacity = Math.max(0, t.ttl * 1.8);
@@ -113,7 +133,7 @@ function useMelee(wep) {
   wep.cd = wep.maxCd;
   if (wep.pathControl) wep.cd *= (1 - Math.min(0.28, wep.pathControl * 0.06));
   vmRecoil = 0.5;
-  const pp = spawnPos();
+  const pp = getMeleeOrigin();
   spawnMeleeTelegraph(wep, pp);
 
   // Trigger weapon attack animation
@@ -123,6 +143,7 @@ function useMelee(wep) {
 
   // Use the same facing source as the telegraph so visual and damage zones match exactly.
   const aimDir = getMeleeAimDir2D();
+  const params = getMeleeHitParams(wep);
   let hit = false;
 
   monsters.forEach(m => {
@@ -134,12 +155,12 @@ function useMelee(wep) {
     const dist2d = Math.sqrt(dx*dx + dz*dz);
     const dy = Math.abs(m.root.position.y - pp.y); // Vertical check
 
-    if (dist2d < wep.range * GameState.pArea && dy < 3.0) {
+    if (dist2d <= params.radius && dy < 3.0) {
       const dirToM = new THREE.Vector2(dx, dz).normalize();
       const dot = aimDir.dot(dirToM);
       
       // Hit only inside displayed arc (or full-circle melee).
-      if (wep.arc >= Math.PI * 2 || dot > Math.cos(wep.arc / 2)) {
+      if (params.arc >= Math.PI * 2 || dot >= Math.cos(params.arc / 2)) {
         let dmg = getPlayerDmg(wep, dist2d);
         const stagger = (GameState.pKnockback || 0) + (wep.stagger || 0) + (wep.pathPower || 0) * 0.35;
         m.takeDmg(dmg, false, stagger, pp);
