@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════
 
 // ==================== HUD STATE ====================
-var hudState = { hp: 100, wep: '', score: 0, time: '0:00', dash: false, hit: false, special: false };
+var hudState = { hp: 100, wep: '', score: 0, time: '0:00', dash: false, hit: false, special: false, runWeaponsLine: '', runPassivesLine: '' };
 var hitFlash = 0;  // Duration of hit flash effect - decremented by game.js when player takes damage
 
 function getMobIcon(shape) {
@@ -148,6 +148,74 @@ function updHUD(dt) {
   if (wStats !== hudState.wep) {
     hudState.wep = wStats;
     document.getElementById('scepterStats').innerHTML = `<i class="${wIcon}"></i> ${wStats}`;
+  }
+
+  // Runtime loadout HUD (6-slot loadout + passive modifiers)
+  let loadoutRoot = document.getElementById('runLoadoutHud');
+  if (!loadoutRoot) {
+    const hud = document.getElementById('hud');
+    if (hud) {
+      const el = document.createElement('div');
+      el.id = 'runLoadoutHud';
+      el.innerHTML = '<div id="runLoadoutLineWeapons"></div><div id="runLoadoutLinePassives"></div>';
+      hud.appendChild(el);
+      loadoutRoot = el;
+    }
+  }
+
+  if (loadoutRoot && GameState && GameState.inventory) {
+    const main = Array.isArray(GameState.inventory.mainWeapons) ? GameState.inventory.mainWeapons : [];
+    const auto = Array.isArray(GameState.inventory.autoWeapons) ? GameState.inventory.autoWeapons : [];
+    const pass = Array.isArray(GameState.inventory.passives) ? GameState.inventory.passives : [];
+
+    const fmtWeapon = (entry) => {
+      if (!entry || !entry.id) return '-';
+      const def = WEAPONS && WEAPONS[entry.id] ? WEAPONS[entry.id] : null;
+      const icon = def && def.icon ? `<i class="${def.icon}"></i> ` : '';
+      return `${icon}${String(entry.id).replace(/_/g, ' ')} L${entry.level || 1}`;
+    };
+    const fmtPassive = (entry) => {
+      if (!entry || !entry.id) return '-';
+      const def = (typeof getPassiveItemDef === 'function') ? getPassiveItemDef(entry.id) : null;
+      const icon = def && def.icon ? `<i class="${def.icon}"></i> ` : '';
+      return `${icon}${def && def.name ? def.name : entry.id} L${entry.level || 1}`;
+    };
+
+    const mainLine = main
+      .map((entry, idx) => {
+        const n = idx + 1;
+        return `<span class="run-slot-tag">${n}</span> ${entry ? fmtWeapon(entry) : '-'}`;
+      })
+      .join(' <span class="run-sep">|</span> ');
+    const extraAuto = auto.filter(Boolean).map(fmtWeapon).join(' · ');
+    const passLine = pass.filter(Boolean).map(fmtPassive).join(' · ') || '-';
+    const autoState = GameState.autoAttackEnabled === false ? 'OFF' : 'ON';
+    const autoStateColor = GameState.autoAttackEnabled === false ? '#ffb070' : '#8ee7a5';
+
+    const weaponLine = `<span style="color:#f0c080">SLOTS:</span> ${mainLine}`
+      + (extraAuto ? ` <span class="run-sep">|</span> <span style="color:#8aa8d8">EXTRA:</span> ${extraAuto}` : '')
+      + ` <span class="run-sep">|</span> <span style="color:${autoStateColor}">AUTO ${autoState}</span> <span style="color:#8a9fb5">(R toggle)</span>`;
+    let phaseLine = '';
+    if (typeof getRunDirectorSnapshot === 'function') {
+      const rd = getRunDirectorSnapshot();
+      if (rd) {
+        const fps = GameState && GameState.runTelemetry ? (GameState.runTelemetry.avgFps || 60) : 60;
+        phaseLine = ` <span class="run-sep">|</span> <span style="color:#ffd37a">PHASE:</span> ${rd.phaseName || '-'} <span style="color:#8a9fb5">(${fps} fps)</span>`;
+      }
+    }
+    const playerLevel = Math.max(1, Math.floor(GameState.pLevel || 1));
+    const passiveLine = `<span style="color:#7ec9ff">NIVEAU:</span> ${playerLevel} <span class="run-sep">|</span> <span style="color:#b8d8a8">MODIFICATEURS:</span> ${passLine} <span class="run-sep">|</span> <span style="color:#ffd37a">NIVEAUX ILLIMITES</span>${phaseLine}`;
+
+    if (weaponLine !== hudState.runWeaponsLine) {
+      hudState.runWeaponsLine = weaponLine;
+      const wEl = document.getElementById('runLoadoutLineWeapons');
+      if (wEl) wEl.innerHTML = weaponLine;
+    }
+    if (passiveLine !== hudState.runPassivesLine) {
+      hudState.runPassivesLine = passiveLine;
+      const pEl = document.getElementById('runLoadoutLinePassives');
+      if (pEl) pEl.innerHTML = passiveLine;
+    }
   }
 
   const isHit = hitFlash > 0;
@@ -297,9 +365,16 @@ window.confirmUpgrade = function() {
         selectedUpgradeData.apply();
         GameState.playerUpgrades[selectedUpgradeId] = (GameState.playerUpgrades[selectedUpgradeId] || 0) + 1;
         updateUpgradesHUD();
+        const pending = Math.max(0, (GameState.pendingBossChestUpgrades || 0) - 1);
+        GameState.pendingBossChestUpgrades = pending;
         GameState.levelingUp = false;
         document.getElementById('lvlUp').style.display = 'none';
         renderer.domElement.requestPointerLock();
+        if (pending > 0) {
+          setTimeout(() => {
+            if (typeof showLevelUp === 'function') showLevelUp();
+          }, 0);
+        }
     }
 };
 
@@ -389,19 +464,40 @@ function canUseUpgrade(u) {
 }
 
 function showLevelUp() {
+  const hasLoadoutPool = (typeof buildLoadoutLevelUpOptions === 'function' && GameState && GameState.inventory);
+
   if (GameState.autoUpgrade) {
-    const pool = UPGRADES.filter(canUseUpgrade).concat(getWeaponPathUpgrades().filter(canUseUpgrade));
-    if (pool.length > 0) {
-      const uIdx = Math.floor(Math.random() * pool.length);
-      const u = pool[uIdx];
-      const r = Math.random();
-      let rarity = RARITIES.common;
-      if (r > 0.9) rarity = RARITIES.legendary;
-      else if (r > 0.6) rarity = RARITIES.rare;
-      u.scale(rarity.m).apply();
-      GameState.playerUpgrades[u.id] = (GameState.playerUpgrades[u.id] || 0) + 1;
-      updateUpgradesHUD();
-      addNotif(`AUTO: ${u.name} (${rarity.n})`, '#ffff00');
+    if (hasLoadoutPool) {
+      const options = buildLoadoutLevelUpOptions(3);
+      if (options && options.length > 0) {
+        const pick = options[Math.floor(Math.random() * options.length)];
+        try {
+          pick.apply();
+          addNotif(`AUTO: ${pick.name}`, '#ffff00');
+        } catch (e) {
+          console.warn('Auto loadout choice failed:', e);
+        }
+      }
+    } else {
+      const pool = UPGRADES.filter(canUseUpgrade).concat(getWeaponPathUpgrades().filter(canUseUpgrade));
+      if (pool.length > 0) {
+        const uIdx = Math.floor(Math.random() * pool.length);
+        const u = pool[uIdx];
+        const r = Math.random();
+        let rarity = RARITIES.common;
+        if (r > 0.9) rarity = RARITIES.legendary;
+        else if (r > 0.6) rarity = RARITIES.rare;
+        u.scale(rarity.m).apply();
+        GameState.playerUpgrades[u.id] = (GameState.playerUpgrades[u.id] || 0) + 1;
+        updateUpgradesHUD();
+        addNotif(`AUTO: ${u.name} (${rarity.n})`, '#ffff00');
+      }
+    }
+    if ((GameState.pendingBossChestUpgrades || 0) > 0) {
+      GameState.pendingBossChestUpgrades--;
+      if (GameState.pendingBossChestUpgrades > 0) {
+        setTimeout(() => showLevelUp(), 0);
+      }
     }
     return;
   }
@@ -432,6 +528,32 @@ function rerollUpgrades() {
   const c = document.getElementById('upCards');
   if (!c) return;
   c.innerHTML = '';
+
+  const hasLoadoutPool = (typeof buildLoadoutLevelUpOptions === 'function' && GameState && GameState.inventory);
+  if (hasLoadoutPool) {
+    const options = buildLoadoutLevelUpOptions(3);
+    for (let i = 0; i < options.length; i++) {
+      const opt = options[i];
+      const el = document.createElement('div');
+      el.className = 'card common';
+      el.style.cssText = 'width:200px;height:280px;background:#1a1a1a;border:2px solid #446688;border-radius:8px;padding:15px;cursor:pointer;transition:transform 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.5);color:#eee;font-family:sans-serif;';
+      el.onmouseenter = () => el.style.transform = 'scale(1.05)';
+      el.onmouseleave = () => el.style.transform = 'scale(1)';
+      el.dataset.borderColor = '#446688';
+
+      el.innerHTML = `
+        <div class="c-type">loadout</div>
+        <div class="c-rarity">run</div>
+        <div class="c-icon"><i class="${opt.icon || 'fa-solid fa-star'}"></i></div>
+        <div class="c-name">${opt.name}</div>
+        <div class="c-desc">${opt.desc || 'Amelioration de build'}</div>
+      `;
+      el.onclick = () => selectUpgrade({ apply: opt.apply, desc: opt.desc || '' }, opt.id, el);
+      c.appendChild(el);
+    }
+    return;
+  }
+
   let pool = [];
   try {
       pool = UPGRADES.filter(canUseUpgrade);
@@ -492,14 +614,65 @@ function hydrateSaveDataForMenu() {
     if (!Array.isArray(GameState.saveData.unlockedBiomes)) GameState.saveData.unlockedBiomes = ['plains'];
     if (!GameState.saveData.unlockedClasses.includes('mage')) GameState.saveData.unlockedClasses.push('mage');
     if (!GameState.saveData.unlockedBiomes.includes('plains')) GameState.saveData.unlockedBiomes.push('plains');
+    if (typeof GameState.saveData.selectedBiomeId !== 'string') GameState.saveData.selectedBiomeId = 'plains';
+    if (typeof GameState.saveData.normalUnlockTier !== 'number') GameState.saveData.normalUnlockTier = 0;
     const money = typeof GameState.saveData.money === 'number' ? GameState.saveData.money : 0;
     const gold = typeof GameState.saveData.gold === 'number' ? GameState.saveData.gold : 0;
     const unified = Math.max(money, gold);
     GameState.saveData.money = unified;
     GameState.saveData.gold = unified;
+
+    if (typeof buildStableClassMaps === 'function') buildStableClassMaps();
+    if (typeof migrateClassSaveData === 'function') migrateClassSaveData();
+    if (typeof syncNormalClassUnlocksFromProgress === 'function') syncNormalClassUnlocksFromProgress(false);
+    if (typeof checkBossUnlocks === 'function') checkBossUnlocks();
   } catch (e) {
     console.warn('Menu save hydration failed:', e);
   }
+}
+
+function persistMenuSelection() {
+  if (!GameState || !GameState.saveData) return;
+  const selectedClass = CLASSES[GameState.selCharIdx];
+  const selectedBiome = BIOMES[GameState.selMapIdx];
+  if (selectedClass && typeof classStableIdMap === 'object' && classStableIdMap[selectedClass.id]) {
+    GameState.saveData.selectedClassStableId = classStableIdMap[selectedClass.id];
+  }
+  if (selectedBiome) GameState.saveData.selectedBiomeId = selectedBiome.id;
+  try {
+    localStorage.setItem('dw_save', JSON.stringify(GameState.saveData));
+  } catch (e) {
+    console.warn('Persist menu selection failed:', e);
+  }
+}
+
+function getClassPowerOrderMap() {
+  const map = {};
+  if (typeof getNormalClassesByPowerAscending === 'function') {
+    getNormalClassesByPowerAscending().forEach((cls, idx) => {
+      map[cls.id] = idx;
+    });
+  }
+  return map;
+}
+
+function getSelectionClassEntries() {
+  const unlocked = Array.isArray(GameState.saveData.unlockedClasses) ? GameState.saveData.unlockedClasses : [];
+  const powerOrder = getClassPowerOrderMap();
+
+  return CLASSES
+    .map((c, idx) => ({ c, idx, unlocked: unlocked.includes(c.id) }))
+    .sort((a, b) => {
+      if (a.unlocked !== b.unlocked) return a.unlocked ? -1 : 1;
+
+      const aHasPower = Object.prototype.hasOwnProperty.call(powerOrder, a.c.id);
+      const bHasPower = Object.prototype.hasOwnProperty.call(powerOrder, b.c.id);
+      if (aHasPower && bHasPower) return powerOrder[a.c.id] - powerOrder[b.c.id];
+      if (aHasPower) return -1;
+      if (bHasPower) return 1;
+
+      return a.idx - b.idx;
+    });
 }
 
 function getWeaponDataByClass(c) {
@@ -526,16 +699,31 @@ function getWeaponDataByClass(c) {
 function initSelectionUI() {
   hydrateSaveDataForMenu();
 
+  const selectedStableClass = (typeof getClassByStableId === 'function')
+    ? getClassByStableId(GameState.saveData.selectedClassStableId)
+    : null;
+  if (selectedStableClass) {
+    const selectedIdx = CLASSES.findIndex((cls) => cls.id === selectedStableClass.id);
+    if (selectedIdx >= 0) GameState.selCharIdx = selectedIdx;
+  }
+
+  if (GameState.saveData.selectedBiomeId) {
+    const selectedBiomeIdx = BIOMES.findIndex((b) => b.id === GameState.saveData.selectedBiomeId);
+    if (selectedBiomeIdx >= 0) GameState.selMapIdx = selectedBiomeIdx;
+  }
+
   // Initialize character grid
   const charGrid = document.getElementById('charGrid');
   if (!charGrid) return;
   charGrid.innerHTML = '';
-  
-  CLASSES.forEach((c, i) => {
+
+  const classEntries = getSelectionClassEntries();
+  classEntries.forEach(({ c, idx: classIndex, unlocked: isUnlocked }) => {
     const el = document.createElement('div');
-    el.className = 'char-card' + (i === GameState.selCharIdx ? ' selected' : '');
-    
-    const isLocked = !GameState.saveData.unlockedClasses.includes(c.id);
+    el.className = 'char-card' + (classIndex === GameState.selCharIdx ? ' selected' : '');
+    el.dataset.classIndex = String(classIndex);
+
+    const isLocked = !isUnlocked;
     if (isLocked) el.classList.add('locked');
     
     // Create a canvas portrait
@@ -556,8 +744,11 @@ function initSelectionUI() {
     
     el.onclick = () => {
       if (window.event) window.event.stopPropagation();
-      GameState.selCharIdx = i;
-      document.querySelectorAll('.char-card').forEach((x, j) => x.classList.toggle('selected', j === i));
+      GameState.selCharIdx = classIndex;
+      document.querySelectorAll('.char-card').forEach((x) => {
+        x.classList.toggle('selected', Number(x.dataset.classIndex) === classIndex);
+      });
+      persistMenuSelection();
       updateSelectionInfo();
     };
     
@@ -593,6 +784,7 @@ function initSelectionUI() {
       if (window.event) window.event.stopPropagation();
       GameState.selMapIdx = i;
       document.querySelectorAll('.stage-card').forEach((x, j) => x.classList.toggle('selected', j === i));
+      persistMenuSelection();
       updateSelectionInfo();
     };
     
@@ -600,6 +792,7 @@ function initSelectionUI() {
   });
   
   updateSelectionInfo();
+  persistMenuSelection();
 }
 
 let charGridResizeBound = false;
@@ -674,37 +867,49 @@ function updateSelectionInfo() {
   document.getElementById('pCharHP').textContent = c.hp;
   document.getElementById('pCharSpd').textContent = c.spd;
   
-  // Get weapon info
+  // Get starter weapon info for loadout summary
   const wep = getWeaponDataByClass(c) || WEAPONS.SCEPTER;
-  document.getElementById('pWeaponName').textContent = c.wep.toUpperCase();
-  const wepStats = document.getElementById('pWeaponStats');
+  const loadoutSummary = document.getElementById('pLoadoutSummary');
+  const capacitySummary = document.getElementById('pCapacitySummary');
   const miniWeapon = document.getElementById('pCharMiniWeapon');
   const miniAbility = document.getElementById('pCharMiniAbility');
-  if (wepStats) {
-    wepStats.textContent = `DMG: ${wep.dmg ?? '--'} | CD: ${wep.maxCd ?? '--'}s`;
+  if (loadoutSummary) {
+    if (typeof getStarterKitSummaryForClass === 'function') {
+      loadoutSummary.textContent = getStarterKitSummaryForClass(c);
+    } else {
+      loadoutSummary.textContent = `Arme initiale: ${(c.wep || '--').toUpperCase()}`;
+    }
+  }
+  if (capacitySummary) {
+    const cap = Number.isFinite(c.maxWeapons) ? c.maxWeapons : 6;
+    capacitySummary.textContent = `Capacite d'armes: ${cap}`;
   }
   if (miniWeapon) {
-    miniWeapon.textContent = `Arme: ${c.wep ? c.wep.toUpperCase() : '--'}`;
+    if (typeof getStarterKitSummaryForClass === 'function') {
+      miniWeapon.textContent = getStarterKitSummaryForClass(c);
+    } else {
+      miniWeapon.textContent = `Loadout: ${c.wep ? c.wep.toUpperCase() : '--'}`;
+    }
   }
-  
-  // Render weapon model
-  renderWeaponPreview(c);
 
-  // Ability block
+  // Movement block
   const abilityName = document.getElementById('pAbilityName');
   const abilityDesc = document.getElementById('pAbilityDesc');
   const abilityIcon = document.getElementById('pAbilityIcon');
+  const movementPreview = (typeof getMovementSkillPreviewForClass === 'function')
+    ? getMovementSkillPreviewForClass(c)
+    : null;
   if (abilityName && abilityDesc) {
-    if (c.special) {
-      abilityName.textContent = `${c.special.name} (${c.special.cd}s)`;
-      abilityDesc.textContent = c.special.desc;
-      if (abilityIcon) abilityIcon.className = c.special.icon || 'fa-solid fa-star';
-      if (miniAbility) miniAbility.textContent = `Capacite: ${c.special.name}`;
+    if (movementPreview) {
+      abilityName.textContent = `${movementPreview.name} (${movementPreview.cd}s)`;
+      abilityDesc.textContent = movementPreview.desc;
+      if (abilityIcon) abilityIcon.className = movementPreview.icon || 'fa-solid fa-person-running';
+      if (miniAbility) miniAbility.textContent = `Mouvement: ${movementPreview.name}`;
     } else {
-      abilityName.textContent = 'Aucune capacité';
-      abilityDesc.textContent = 'Ce personnage n\'a pas de capacité active.';
+      abilityName.textContent = 'Mouvement standard';
+      abilityDesc.textContent = 'Competence de mouvement non definie pour cette classe.';
       if (abilityIcon) abilityIcon.className = 'fa-solid fa-ban';
-      if (miniAbility) miniAbility.textContent = 'Capacite: Aucune';
+      if (miniAbility) miniAbility.textContent = 'Mouvement: Standard';
     }
   }
   
@@ -717,6 +922,13 @@ function updateSelectionInfo() {
     if (charModelBlock) charModelBlock.classList.add('is-locked');
     if (c.unlockReq) {
       unlockText.textContent = `Condition de deblocage: ${c.unlockReq}`;
+    } else if (c.specificUnlock) {
+      const req = c.specificUnlock;
+      const bits = [];
+      if (req.biomeId) bits.push(`Biome ${req.biomeId}`);
+      if (req.classId) bits.push(`Classe ${req.classId}`);
+      if (req.weaponId) bits.push(`Arme ${req.weaponId}`);
+      unlockText.textContent = `Condition de deblocage: ${bits.join(' + ')}`;
     } else if (c.linkedBiome) {
       const linkedBiome = (typeof BIOMES !== 'undefined' && Array.isArray(BIOMES))
         ? BIOMES.find((x) => x.id === c.linkedBiome)
@@ -726,6 +938,11 @@ function updateSelectionInfo() {
         : 'Condition de deblocage: Vaincre le boss du biome lie';
     } else if (c.shopPrice) {
       unlockText.textContent = `Condition de deblocage: Acheter en boutique (${c.shopPrice.toLocaleString()} or)`;
+    } else if (typeof isNormalPlayableClass === 'function' && isNormalPlayableClass(c) && typeof getNormalClassUnlockBiome === 'function') {
+      const reqBiome = getNormalClassUnlockBiome(c.id);
+      unlockText.textContent = reqBiome
+        ? `Condition de deblocage: Terminer ${reqBiome.name}`
+        : 'Condition de deblocage: Progression des biomes';
     } else {
       unlockText.textContent = 'Condition de deblocage: Verrouille';
     }
@@ -1197,8 +1414,12 @@ window.randomCharacter = function() {
   
   const randomClass = unlockedClasses[Math.floor(Math.random() * unlockedClasses.length)];
   GameState.selCharIdx = randomClass.i;
-  
-  document.querySelectorAll('.char-card').forEach((x, j) => x.classList.toggle('selected', j === randomClass.i));
+
+  // Cards are sorted in ui-selection.js, so rely on data-class-index instead of visual order.
+  document.querySelectorAll('.char-card').forEach((x) => {
+    x.classList.toggle('selected', Number(x.dataset.classIndex) === randomClass.i);
+  });
+  if (typeof persistMenuSelection === 'function') persistMenuSelection();
   updateSelectionInfo();
   
   addNotif(`🎲 ${randomClass.c.name} sélectionné !`, '#ffaa00');
@@ -1212,6 +1433,7 @@ window.randomStage = function() {
   GameState.selMapIdx = randomBiome.i;
   
   document.querySelectorAll('.stage-card').forEach((x, j) => x.classList.toggle('selected', j === randomBiome.i));
+  if (typeof persistMenuSelection === 'function') persistMenuSelection();
   updateSelectionInfo();
   
   addNotif(`🎲 ${randomBiome.b.name} sélectionné !`, '#ffaa00');
@@ -1398,7 +1620,7 @@ function injectDOM() {
   if (!document.getElementById('skillsHUD')) {
       const sk = document.createElement('div');
       sk.id = 'skillsHUD';
-      sk.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:20px;z-index:100;pointer-events:none;';
+      sk.style.cssText = 'position:fixed;right:18px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:14px;z-index:100;pointer-events:none;align-items:flex-end;';
       sk.innerHTML = `
           <style>
               .skill-slot { width: 60px; height: 60px; background: rgba(0,0,0,0.6); border: 2px solid #444; border-radius: 8px; position: relative; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #fff; transition: border-color 0.2s; }
@@ -1610,7 +1832,9 @@ window.openProgression = function() {
   const totalBiomes = BIOMES.length;
   const unlockedBiomes = GameState.saveData.unlockedBiomes.length;
   const totalCards = MTYPES.length;
-  const collectedCards = GameState.saveData.cards.length;
+  const collectedCards = Array.isArray(GameState.saveData.cards) ? GameState.saveData.cards.length : 0;
+  const cardStacks = (GameState.saveData.cardStacks && typeof GameState.saveData.cardStacks === 'object') ? GameState.saveData.cardStacks : {};
+  const totalCardStacks = Object.values(cardStacks).reduce((acc, v) => acc + Math.max(0, Number(v) || 0), 0);
   
   const globalPct = Math.floor(((unlockedClasses + unlockedBiomes) / (totalClasses + totalBiomes)) * 100);
 
@@ -1637,7 +1861,7 @@ window.openProgression = function() {
       </div>
       
       <div class="prog-section">
-        <h3>COLLECTION DE CARTES (BONUS) <span>${collectedCards}/${totalCards}</span></h3>
+        <h3>COLLECTION DE CARTES (BONUS) <span>${collectedCards}/${totalCards} | stacks ${totalCardStacks}</span></h3>
         <div id="progCardsContainer"></div>
       </div>
     </div>
@@ -1691,13 +1915,14 @@ window.openProgression = function() {
       const m = MTYPES.find(x => x.name === mobName);
       if (m) {
         hasCards = true;
-        const collected = GameState.saveData.cards.includes(m.name);
+        const collected = Array.isArray(GameState.saveData.cards) && GameState.saveData.cards.includes(m.name);
+        const stackCount = collected ? (cardStacks[m.name] || 1) : 0;
         const icon = collected ? getMobIcon(m.shape) : 'fa-solid fa-question';
         
         const el = document.createElement('div');
         el.className = `mob-card ${collected?'collected':''}`;
         el.innerHTML = `
-            ${collected ? '<div class="mob-new">NEW</div>' : ''}
+          ${collected ? `<div class="mob-new">x${stackCount}</div>` : ''}
             <i class="${icon}"></i>
             <div class="mob-name">${collected ? m.name : '???'}</div>
         `;
@@ -1714,7 +1939,7 @@ window.openProgression = function() {
                 
                 window.previewTarget = content;
                 previewEntity('enemy', MTYPES.indexOf(m));
-                info.innerHTML = `<b>${m.name}</b><br><span style="font-size:18px">HP: ${m.hp} · DMG: ${m.dmg} · SPD: ${m.spd}</span>`;
+                info.innerHTML = `<b>${m.name}</b><br><span style="font-size:18px">HP: ${m.hp} · DMG: ${m.dmg} · SPD: ${m.spd} · CARTES: ${stackCount}</span>`;
             };
         }
         
@@ -2121,7 +2346,7 @@ window.openMarket = function() {
         document.body.appendChild(ui);
     }
     ui.style.display = 'flex';
-    switchMarketTab('upgrades');
+    switchMarketTab('relics');
 };
 
 window.closeMarket = function() {
@@ -2146,20 +2371,94 @@ window.switchMarketTab = function(tab) {
             <div style="font-size:24px;color:#ffd700;"><i class="fa-solid fa-coins"></i> ${Math.floor(money)}</div>
         </div>
         <div style="display:flex;gap:10px;margin-bottom:20px;">
-            <button onclick="switchMarketTab('upgrades')" style="padding:10px 20px;background:${tab==='upgrades'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">AMÉLIORATIONS</button>
+          <button onclick="switchMarketTab('relics')" style="padding:10px 20px;background:${tab==='relics'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">RELIQUES</button>
+          <button onclick="switchMarketTab('upgrades')" style="padding:10px 20px;background:${tab==='upgrades'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">DOCTRINE</button>
             <button onclick="switchMarketTab('characters')" style="padding:10px 20px;background:${tab==='characters'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">PERSONNAGES</button>
             <button onclick="switchMarketTab('cosmetics')" style="padding:10px 20px;background:${tab==='cosmetics'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">COSMÉTIQUES</button>
-            <button onclick="switchMarketTab('casino')" style="padding:10px 20px;background:${tab==='casino'?'#d0a030':'#333'};color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">CASINO</button>
         </div>
         <div id="marketContent" style="width:100%;display:flex;flex-direction:column;align-items:center;"></div>
         <button class="gal-btn" onclick="closeMarket()" style="margin-top:30px;width:200px;">RETOUR</button>
     `;
     ui.innerHTML = html;
     
-    if (tab === 'upgrades') renderUpgrades();
+    if (tab === 'relics') renderArmoryShop();
+    else if (tab === 'upgrades') renderUpgrades();
     else if (tab === 'characters') renderCharacterShop();
     else if (tab === 'cosmetics') renderShop();
-    else if (tab === 'casino') renderCasino();
+};
+
+window.renderArmoryShop = function() {
+    const ui = document.getElementById('marketContent');
+    const money = GameState.saveData.money || 0;
+    if (!GameState.saveData.marketRelics || typeof GameState.saveData.marketRelics !== 'object') {
+      GameState.saveData.marketRelics = {};
+    }
+
+    const offers = [
+      { id:'arsenal_cache', name:'Arsenal Cache', icon:'fa-solid fa-crosshairs', cost:2800, desc:'+1 niveau de Doctrine Precision et Might', apply:function(){
+        if (!GameState.saveData.permUpgrades) GameState.saveData.permUpgrades = {};
+        GameState.saveData.permUpgrades.p_speed = Math.min(5, (GameState.saveData.permUpgrades.p_speed || 0) + 1);
+        GameState.saveData.permUpgrades.p_strength = Math.min(20, (GameState.saveData.permUpgrades.p_strength || 0) + 1);
+      }},
+      { id:'vital_reliquary', name:'Vital Reliquary', icon:'fa-solid fa-heart-pulse', cost:3200, desc:'+1 niveau HP et Regen permanents', apply:function(){
+        if (!GameState.saveData.permUpgrades) GameState.saveData.permUpgrades = {};
+        GameState.saveData.permUpgrades.p_health = Math.min(20, (GameState.saveData.permUpgrades.p_health || 0) + 1);
+        GameState.saveData.permUpgrades.p_regen = Math.min(10, (GameState.saveData.permUpgrades.p_regen || 0) + 1);
+      }},
+      { id:'hunter_contract', name:'Hunter Contract', icon:'fa-solid fa-bullseye', cost:3600, desc:'+1 niveau Crit et Pickup permanents', apply:function(){
+        if (!GameState.saveData.permUpgrades) GameState.saveData.permUpgrades = {};
+        GameState.saveData.permUpgrades.p_luck = Math.min(10, (GameState.saveData.permUpgrades.p_luck || 0) + 1);
+        GameState.saveData.permUpgrades.p_greed = Math.min(10, (GameState.saveData.permUpgrades.p_greed || 0) + 1);
+      }}
+    ];
+
+    let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:15px;width:100%;max-width:1000px;">`;
+    offers.forEach((o) => {
+      const bought = !!GameState.saveData.marketRelics[o.id];
+      const canBuy = !bought && money >= o.cost;
+      html += `
+        <div style="background:rgba(255,255,255,0.05);border:1px solid ${bought?'#00ff88':'#444'};border-radius:8px;padding:15px;display:flex;flex-direction:column;align-items:center;text-align:center;">
+          <div style="font-size:34px;color:#f0d080;margin-bottom:8px;"><i class="${o.icon}"></i></div>
+          <div style="font-weight:bold;color:#fff;margin-bottom:6px;">${o.name}</div>
+          <div style="font-size:12px;color:#aaa;margin-bottom:10px;">${o.desc}</div>
+          ${bought
+            ? `<button style="margin-top:auto;padding:8px 14px;background:#226644;color:#fff;border:none;border-radius:4px;font-weight:bold;">OBTENU</button>`
+            : `<button onclick="buyMarketRelic('${o.id}')" style="margin-top:auto;padding:8px 14px;background:${canBuy?'#d0a030':'#333'};color:${canBuy?'#000':'#666'};border:none;border-radius:4px;font-weight:bold;" ${!canBuy?'disabled':''}><i class="fa-solid fa-coins"></i> ${o.cost}</button>`}
+        </div>
+      `;
+    });
+    html += `</div>`;
+    ui.innerHTML = html;
+};
+
+window.buyMarketRelic = function(id) {
+    const offers = {
+      arsenal_cache: function(){
+        if (!GameState.saveData.permUpgrades) GameState.saveData.permUpgrades = {};
+        GameState.saveData.permUpgrades.p_speed = Math.min(5, (GameState.saveData.permUpgrades.p_speed || 0) + 1);
+        GameState.saveData.permUpgrades.p_strength = Math.min(20, (GameState.saveData.permUpgrades.p_strength || 0) + 1);
+      },
+      vital_reliquary: function(){
+        if (!GameState.saveData.permUpgrades) GameState.saveData.permUpgrades = {};
+        GameState.saveData.permUpgrades.p_health = Math.min(20, (GameState.saveData.permUpgrades.p_health || 0) + 1);
+        GameState.saveData.permUpgrades.p_regen = Math.min(10, (GameState.saveData.permUpgrades.p_regen || 0) + 1);
+      },
+      hunter_contract: function(){
+        if (!GameState.saveData.permUpgrades) GameState.saveData.permUpgrades = {};
+        GameState.saveData.permUpgrades.p_luck = Math.min(10, (GameState.saveData.permUpgrades.p_luck || 0) + 1);
+        GameState.saveData.permUpgrades.p_greed = Math.min(10, (GameState.saveData.permUpgrades.p_greed || 0) + 1);
+      }
+    };
+    const costs = { arsenal_cache: 2800, vital_reliquary: 3200, hunter_contract: 3600 };
+    if (!costs[id] || !offers[id]) return;
+    if (!GameState.saveData.marketRelics) GameState.saveData.marketRelics = {};
+    if (GameState.saveData.marketRelics[id]) return;
+    if ((GameState.saveData.money || 0) < costs[id]) return;
+    GameState.saveData.money -= costs[id];
+    offers[id]();
+    GameState.saveData.marketRelics[id] = true;
+    localStorage.setItem('dw_save', JSON.stringify(GameState.saveData));
+    switchMarketTab('relics');
 };
 
 window.renderUpgrades = function() {

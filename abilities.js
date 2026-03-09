@@ -4,7 +4,30 @@
 
 // ==================== CAMERA & PLAYER ====================
 function fwd() {
+  if (GameState && GameState.autoAimDir && GameState.autoAimDir.isVector3) {
+    return GameState.autoAimDir.clone().normalize();
+  }
   return new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(camPitch, camYaw, 0, 'YXZ')).normalize();
+}
+
+function getNearestMonsterAimDir() {
+  if (!playerPivot || !Array.isArray(monsters) || monsters.length === 0) return null;
+  let nearest = null;
+  let bestDist = Infinity;
+  const pp = playerPivot.position;
+  for (let i = 0; i < monsters.length; i++) {
+    const m = monsters[i];
+    if (!m || m.dead || !m.root || !m.root.position) continue;
+    const d = m.root.position.distanceTo(pp);
+    if (d < bestDist) {
+      bestDist = d;
+      nearest = m;
+    }
+  }
+  if (!nearest) return null;
+  const dir = nearest.root.position.clone().sub(pp);
+  if (dir.lengthSq() < 0.0001) return null;
+  return dir.normalize();
 }
 
 function spawnPos() {
@@ -44,6 +67,26 @@ function getPlayerDmg(wep, targetDist = 0) {
 
 var meleeTelegraphs = [];
 
+function getWeaponFamilyColor(weaponKey) {
+  const k = String(weaponKey || '').toUpperCase();
+  if (k.includes('LIGHTNING') || k.includes('THUNDER') || k.includes('SPARK') || k.includes('CHAIN') || k.includes('JUDGMENT')) return 0xd8f03a;
+  if (k.includes('POTION') || k.includes('FLASK') || k.includes('ALCHEM') || k.includes('BOMB') || k.includes('MORTAR')) return 0x57e26a;
+  if (k.includes('VOID') || k.includes('SHADOW') || k.includes('DARK') || k.includes('PHANTOM') || k.includes('FATE') || k.includes('ECLIPSE')) return 0xa857ff;
+  if (k.includes('ARCANE') || k.includes('MAGIC') || k.includes('SCEPTER') || k.includes('GRIMOIRE') || k.includes('RUNE') || k.includes('SUN') || k.includes('STAR') || k.includes('TOME')) return 0x56b7ff;
+  if (k.includes('SPEAR') || k.includes('LANCE') || k.includes('JAVELIN') || k.includes('RAIL') || k.includes('BOW') || k.includes('RIFLE') || k.includes('PISTOL') || k.includes('REVOLVER')) return 0xffd07b;
+  return 0xff8844;
+}
+
+function getWeaponFamilyId(weaponKey) {
+  const k = String(weaponKey || '').toUpperCase();
+  if (k.includes('LIGHTNING') || k.includes('THUNDER') || k.includes('SPARK') || k.includes('CHAIN') || k.includes('JUDGMENT')) return 'storm';
+  if (k.includes('POTION') || k.includes('FLASK') || k.includes('ALCHEM') || k.includes('BOMB') || k.includes('MORTAR')) return 'alchemy';
+  if (k.includes('VOID') || k.includes('SHADOW') || k.includes('DARK') || k.includes('PHANTOM') || k.includes('FATE') || k.includes('ECLIPSE')) return 'shadow';
+  if (k.includes('ARCANE') || k.includes('MAGIC') || k.includes('SCEPTER') || k.includes('GRIMOIRE') || k.includes('RUNE') || k.includes('SUN') || k.includes('STAR') || k.includes('TOME')) return 'arcane';
+  if (k.includes('SPEAR') || k.includes('LANCE') || k.includes('JAVELIN') || k.includes('RAIL') || k.includes('BOW') || k.includes('RIFLE') || k.includes('PISTOL') || k.includes('REVOLVER')) return 'precision';
+  return 'martial';
+}
+
 function spawnMeleeTelegraph(wep) {
   const pp = playerPivot.position;
   const areaMul = GameState.pArea || 1;
@@ -52,7 +95,7 @@ function spawnMeleeTelegraph(wep) {
   const start = camYaw - arc * 0.5;
   const geom = new THREE.CircleGeometry(radius, Math.max(12, Math.floor(22 * arc / Math.PI)), start, arc);
   geom.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
+  const mat = new THREE.MeshBasicMaterial({ color: getWeaponFamilyColor(wep.key), transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.position.set(pp.x, terrainH(pp.x, pp.z) + 0.06, pp.z);
   scene.add(mesh);
@@ -110,11 +153,58 @@ function useMelee(wep) {
         let dmg = getPlayerDmg(wep, dist2d);
         const stagger = (GameState.pKnockback || 0) + (wep.stagger || 0) + (wep.pathPower || 0) * 0.35;
         m.takeDmg(dmg, false, stagger, pp);
+
+        const familyId = getWeaponFamilyId(wep.key);
+        if (familyId === 'storm') {
+          let chainFrom = m;
+          let chained = [m];
+          for (let sj = 0; sj < 2; sj++) {
+            let next = null;
+            let best = Infinity;
+            monsters.forEach(mm => {
+              if (!mm || mm.dead || chained.indexOf(mm) >= 0 || !mm.root || !chainFrom.root) return;
+              const d = mm.root.position.distanceTo(chainFrom.root.position);
+              if (d < best && d <= 6.5) { best = d; next = mm; }
+            });
+            if (!next) break;
+            next.takeDmg(dmg * (0.45 - sj * 0.12), false, 0.2, chainFrom.root.position);
+            spawnPart(next.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xe7ff66, 4, 3);
+            chained.push(next);
+            chainFrom = next;
+          }
+        } else if (familyId === 'alchemy') {
+          if (typeof spawnFamilyGroundZone === 'function') {
+            spawnFamilyGroundZone(m.root.position.clone(), 'alchemy', dmg, 2.0 + (wep.blast || 0) * 0.3, 2.2);
+          }
+        } else if (familyId === 'shadow') {
+          let nextShadow = null;
+          let bestShadow = Infinity;
+          monsters.forEach(sm => {
+            if (!sm || sm.dead || sm === m || !sm.root) return;
+            const d = sm.root.position.distanceTo(m.root.position);
+            if (d < bestShadow && d <= 5.8) { bestShadow = d; nextShadow = sm; }
+          });
+          if (nextShadow) {
+            nextShadow.takeDmg(dmg * 0.5, false, 0.25, m.root.position);
+            spawnPart(nextShadow.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xc895ff, 4, 3);
+          }
+        } else if (familyId === 'arcane') {
+          monsters.forEach(am => {
+            if (!am || am.dead || am === m || !am.root) return;
+            if (am.root.position.distanceTo(m.root.position) <= 2.4) {
+              am.takeDmg(dmg * 0.32, false, 0.15, m.root.position);
+            }
+          });
+          spawnPart(m.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0x74c7ff, 5, 4);
+        } else if (familyId === 'precision' && dist2d > (wep.range * 0.6)) {
+          m.takeDmg(dmg * 0.25, true, 0.1, pp);
+        }
+
         if (Math.random() < GameState.pBleedChance) {
           m.bleedStack += Math.ceil(dmg * 0.2);
           addNotif('🩸 Saignement', '#aa0000');
         }
-        spawnPart(m.root.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 0xff0000, 5, 4);
+        spawnPart(m.root.position.clone().add(new THREE.Vector3(0, 1.5, 0)), getWeaponFamilyColor(wep.key), 6, 4);
         hit = true;
       }
     }
@@ -351,6 +441,122 @@ function useWhip() {
       spawnPart(m.root.position, 0xffffff, 3, 3);
     }
   });
+}
+
+function fireArcaneOrbit() {
+  if (WEAPONS.ARCANE_ORB.cd > 0) return;
+  WEAPONS.ARCANE_ORB.cd = GameState.frenzyTimer > 0 ? 0.18 : WEAPONS.ARCANE_ORB.maxCd;
+
+  const pp = playerPivot.position;
+  const wep = WEAPONS.ARCANE_ORB;
+  const radius = Math.max(2.0, 3.2 * (GameState.pArea || 1));
+  const tick = Math.max(0.35, (wep.maxCd || 0.5) * 0.75);
+  const dmg = getPlayerDmg(wep) * 0.55;
+
+  let hit = false;
+  for (let i = 0; i < monsters.length; i++) {
+    const m = monsters[i];
+    if (!m || m.dead || !m.root) continue;
+    const d = m.root.position.distanceTo(pp);
+    if (d > radius) continue;
+    m.takeDmg(dmg, false, 0.2, pp);
+    hit = true;
+    if (Math.random() < 0.35) spawnPart(m.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0x66ccff, 3, 2);
+  }
+
+  // Keep a short-lived zone so this weapon feels like a true orbiting aura.
+  if (typeof spawnFamilyGroundZone === 'function') {
+    spawnFamilyGroundZone(pp.clone(), 'arcane', dmg, radius * 0.55, tick);
+  }
+  if (hit) vmRecoil = 0.1;
+}
+
+function fireSawRing() {
+  if (WEAPONS.SAW_BLADE.cd > 0) return;
+  WEAPONS.SAW_BLADE.cd = GameState.frenzyTimer > 0 ? 0.22 : WEAPONS.SAW_BLADE.maxCd;
+
+  const pp = playerPivot.position;
+  const wep = WEAPONS.SAW_BLADE;
+  const radius = Math.max(2.2, 3.8 * (GameState.pArea || 1));
+  const dmg = getPlayerDmg(wep) * 0.7;
+
+  for (let i = 0; i < monsters.length; i++) {
+    const m = monsters[i];
+    if (!m || m.dead || !m.root) continue;
+    const d = m.root.position.distanceTo(pp);
+    if (d > radius) continue;
+
+    const dir = m.root.position.clone().sub(pp).normalize();
+    m.takeDmg(dmg, false, 0.6, pp);
+    m.takeDmg(dmg * 0.35, false, 0.35, pp.clone().addScaledVector(dir, 0.5));
+    spawnPart(m.root.position.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xd5d5d5, 4, 2);
+  }
+  vmRecoil = 0.12;
+}
+
+function fireChainLightningPulse(weaponKey) {
+  const key = weaponKey || 'CHAIN_LIGHTNING';
+  if (!WEAPONS[key] || WEAPONS[key].cd > 0) return;
+  WEAPONS[key].cd = GameState.frenzyTimer > 0 ? 0.14 : WEAPONS[key].maxCd;
+
+  const wep = WEAPONS[key];
+  const pp = playerPivot.position;
+  const maxChains = Math.max(2, Math.floor((wep.pierce || 1) + (wep.count || 1)));
+  const linkRange = Math.max(4.0, 5.5 * (GameState.pArea || 1));
+  const baseDmg = getPlayerDmg(wep);
+
+  let current = null;
+  let bestStart = Infinity;
+  for (let i = 0; i < monsters.length; i++) {
+    const m = monsters[i];
+    if (!m || m.dead || !m.root) continue;
+    const d = m.root.position.distanceTo(pp);
+    if (d < bestStart) { bestStart = d; current = m; }
+  }
+  if (!current) return;
+
+  const visited = [current];
+  for (let c = 0; c < maxChains; c++) {
+    if (!current || current.dead || !current.root) break;
+    const falloff = Math.max(0.35, 1 - c * 0.16);
+    const from = c === 0 ? pp : visited[c - 1].root.position;
+    current.takeDmg(baseDmg * falloff, false, 0.2, from);
+    spawnPart(current.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xeeff66, 8, 3);
+
+    let next = null;
+    let best = Infinity;
+    for (let i = 0; i < monsters.length; i++) {
+      const m = monsters[i];
+      if (!m || m.dead || !m.root || visited.indexOf(m) >= 0) continue;
+      const d = m.root.position.distanceTo(current.root.position);
+      if (d < best && d <= linkRange) { best = d; next = m; }
+    }
+    if (!next) break;
+    visited.push(next);
+    current = next;
+  }
+  vmRecoil = 0.14;
+}
+
+function fireNovaTomeWave() {
+  if (WEAPONS.NOVA_TOME.cd > 0) return;
+  WEAPONS.NOVA_TOME.cd = GameState.frenzyTimer > 0 ? 0.2 : WEAPONS.NOVA_TOME.maxCd;
+
+  const pp = playerPivot.position;
+  const wep = WEAPONS.NOVA_TOME;
+  const radius = Math.max(3.0, 5.8 * (GameState.pArea || 1));
+  const dmg = getPlayerDmg(wep) * 0.62;
+
+  spawnPart(pp.clone().add(new THREE.Vector3(0, 1.1, 0)), 0xb38cff, 28, 4);
+  for (let i = 0; i < monsters.length; i++) {
+    const m = monsters[i];
+    if (!m || m.dead || !m.root) continue;
+    const d = m.root.position.distanceTo(pp);
+    if (d > radius) continue;
+    const knock = Math.max(0.15, (radius - d) / radius) * 1.2;
+    m.takeDmg(dmg, false, knock, pp);
+  }
+  vmRecoil = 0.1;
 }
 
 function fireCards() {
@@ -1392,28 +1598,81 @@ function createVM(type) {
   if (vm) camera.remove(vm);
   vm = new THREE.Group();
   camera.add(vm);
-  vm.position.set(0.4, -0.3, -0.5);
+  vm.position.set(0, -0.3, -0.5);
+  if (GameState && GameState.hideWeaponModels) {
+    vm.visible = false;
+    return;
+  }
   updateWeaponVisuals();
 }
 
 function updateWeaponVisuals() {
   if (GameState.galleryMode) return;
-  let t = 'sword', l = 1;
-
-  // Détection dynamique de l'arme active
-  for (const k in WEAPONS) {
-    if (WEAPONS[k].active) {
-      t = k.toLowerCase();
-      l = WEAPONS[k].level || 1;
-      break;
+  if (GameState && GameState.hideWeaponModels) {
+    if (window.vmModel && vm) vm.remove(window.vmModel);
+    if (window.vmModelLeft && vm) vm.remove(window.vmModelLeft);
+    window.vmModel = null;
+    window.vmModelLeft = null;
+    window.vmModelRight = null;
+    if (window.tpWeapon && window.tpWeapon.parent) window.tpWeapon.parent.remove(window.tpWeapon);
+    window.tpWeapon = null;
+    if (typeof playerParts !== 'undefined') {
+      if (playerParts.weapon) playerParts.weapon.visible = false;
+      if (playerParts.weapon2) playerParts.weapon2.visible = false;
     }
+    return;
   }
 
+  function tintWeaponModel(model, tintHex, strength) {
+    if (!model || !model.traverse) return;
+    var tint = new THREE.Color(tintHex);
+    var mix = Math.max(0, Math.min(1, strength || 0));
+    model.traverse(function (node) {
+      if (!node || !node.material || !node.material.color) return;
+      node.material.color.lerp(tint, mix);
+      if (node.material.transparent) node.material.opacity = Math.min(1, (node.material.opacity || 1) * 0.98);
+    });
+  }
+
+  var rightWeaponKey = null;
+  var leftWeaponKey = null;
+
+  if (GameState && GameState.inventory && Array.isArray(GameState.inventory.mainWeapons)) {
+    var mainSlots = GameState.inventory.mainWeapons;
+    if (mainSlots[0] && mainSlots[0].id && WEAPONS[mainSlots[0].id]) rightWeaponKey = mainSlots[0].id;
+    if (mainSlots[1] && mainSlots[1].id && WEAPONS[mainSlots[1].id]) leftWeaponKey = mainSlots[1].id;
+  }
+
+  if (!rightWeaponKey) {
+    for (const k in WEAPONS) {
+      if (WEAPONS[k] && WEAPONS[k].active) {
+        rightWeaponKey = k;
+        break;
+      }
+    }
+  }
+  if (!rightWeaponKey) rightWeaponKey = 'SCEPTER';
+  if (!leftWeaponKey) leftWeaponKey = rightWeaponKey;
+
+  var rightLevel = (WEAPONS[rightWeaponKey] && WEAPONS[rightWeaponKey].level) || 1;
+  var leftLevel = (WEAPONS[leftWeaponKey] && WEAPONS[leftWeaponKey].level) || 1;
+
   if (window.vmModel && vm) vm.remove(window.vmModel);
-  window.vmModel = buildWeapon3D(t, l);
+  if (window.vmModelLeft && vm) vm.remove(window.vmModelLeft);
+
+  window.vmModel = buildWeapon3D(rightWeaponKey.toLowerCase(), rightLevel);
   window.vmModel.scale.set(1.0, 1.0, 1.0);
   window.vmModel.rotation.set(-Math.PI/4, 0, 0);
+  tintWeaponModel(window.vmModel, 0xffb778, 0.08);
   if (vm) vm.add(window.vmModel);
+
+  window.vmModelLeft = buildWeapon3D(leftWeaponKey.toLowerCase(), leftLevel);
+  window.vmModelLeft.scale.set(1.0, 1.0, 1.0);
+  window.vmModelLeft.rotation.set(-Math.PI/4, Math.PI, 0);
+  tintWeaponModel(window.vmModelLeft, 0x8fb9ff, 0.14);
+  if (vm) vm.add(window.vmModelLeft);
+
+  window.vmModelRight = window.vmModel;
 
   // 3rd Person Weapon Attachment
   if (typeof playerParts !== 'undefined') {
@@ -1458,6 +1717,8 @@ function updateWeaponVisuals() {
       };
       
       // Create new 3D weapon (3rd person - no viewmodel rotation)
+      var t = rightWeaponKey.toLowerCase();
+      var l = rightLevel;
       window.tpWeapon = buildWeapon3D(t, l, false);
       const S = (typeof playerTypeData !== 'undefined' && playerTypeData.S) ? playerTypeData.S : 1.0;
       const weaponScale = getWeaponScale(t);
@@ -1533,58 +1794,230 @@ function updateWeaponVisuals() {
 }
 
 // ==================== FIRE INPUT ====================
+function fireWeaponById(weaponId) {
+  if (!weaponId || !WEAPONS[weaponId]) return false;
+  if (!GameState.runUsedWeapons || typeof GameState.runUsedWeapons !== 'object') {
+    GameState.runUsedWeapons = {};
+  }
+  GameState.runUsedWeapons[String(weaponId).toUpperCase()] = true;
+  var prevWeaponCtx = GameState._currentFireWeaponId;
+  GameState._currentFireWeaponId = weaponId;
+
+  function fireWeaponUsingTemplate(evolvedId, templateId, fireFn) {
+    if (!WEAPONS[evolvedId] || !WEAPONS[templateId] || typeof fireFn !== 'function') return false;
+    var evolved = WEAPONS[evolvedId];
+    var template = WEAPONS[templateId];
+    var runtimeKeys = [
+      'dmg', 'cd', 'maxCd', 'count', 'spread', 'speed', 'life', 'homing', 'blast',
+      'pierce', 'bounce', 'fire', 'ice', 'lightning', 'range', 'arc', 'boomerang'
+    ];
+    var backup = {};
+    for (var i = 0; i < runtimeKeys.length; i++) {
+      var key = runtimeKeys[i];
+      backup[key] = template[key];
+      if (evolved[key] !== undefined) template[key] = evolved[key];
+    }
+
+    fireFn();
+    evolved.cd = template.cd;
+
+    for (var j = 0; j < runtimeKeys.length; j++) {
+      var restoreKey = runtimeKeys[j];
+      template[restoreKey] = backup[restoreKey];
+    }
+    return true;
+  }
+
+  try {
+    switch (weaponId) {
+    case 'SKY_BREAKER': return fireWeaponUsingTemplate('SKY_BREAKER', 'RAIL_LANCE', function () { fireJavelin(); });
+    case 'APOCALYPSE_TOME': return fireWeaponUsingTemplate('APOCALYPSE_TOME', 'NOVA_TOME', function () { fireNovaTomeWave(); });
+    case 'OBLIVION_MORTAR': return fireWeaponUsingTemplate('OBLIVION_MORTAR', 'SIEGE_MORTAR', function () { fireBomb(); });
+    case 'FATE_WEAVER': return fireWeaponUsingTemplate('FATE_WEAVER', 'FATE_NEEDLE', function () { fireNeedles(); });
+    case 'INFINITE_MISSILE': return fireWeaponUsingTemplate('INFINITE_MISSILE', 'MAGIC_MISSILE', function () { fireScepter(); });
+    case 'ECLIPSE_DISC': return fireWeaponUsingTemplate('ECLIPSE_DISC', 'SHADOW_DISC', function () { fireBoomerang(); });
+    case 'SPEAR_OF_RUIN': return fireWeaponUsingTemplate('SPEAR_OF_RUIN', 'CELESTIAL_SPEAR', function () { fireJavelin(); });
+    case 'ARCANA_STORM': return fireWeaponUsingTemplate('ARCANA_STORM', 'PHANTOM_TAROT', function () { fireCards(); });
+    case 'JUDGMENT_CHAIN': return fireWeaponUsingTemplate('JUDGMENT_CHAIN', 'DRAGON_SPARK', function () { fireLightningRod(); });
+    case 'ALCHEMICAL_DELUGE': return fireWeaponUsingTemplate('ALCHEMICAL_DELUGE', 'SACRED_FLASK', function () { firePotion(); });
+    case 'ASTRAL_ORBIT': return fireWeaponUsingTemplate('ASTRAL_ORBIT', 'ARCANE_ORB', function () { fireArcaneOrbit(); });
+    case 'COSMIC_RIPSAW': return fireWeaponUsingTemplate('COSMIC_RIPSAW', 'SAW_BLADE', function () { fireSawRing(); });
+    case 'HELLFIRE_STAFF': return fireWeaponUsingTemplate('HELLFIRE_STAFF', 'FIRE_STAFF', function () { fireFireStaff(); });
+    case 'BLOODSTORM_LANCE': return fireWeaponUsingTemplate('BLOODSTORM_LANCE', 'BLOOD_LANCE', function () { fireJavelin(); });
+    case 'HOLY_WAND': return fireWeaponUsingTemplate('HOLY_WAND', 'SCEPTER', function () { fireScepter(); });
+    case 'THOUSAND_EDGE': return fireWeaponUsingTemplate('THOUSAND_EDGE', 'DAGGERS', function () { useMelee(WEAPONS.DAGGERS); });
+    case 'DEATH_SPIRAL': return fireWeaponUsingTemplate('DEATH_SPIRAL', 'AXE', function () { useMelee(WEAPONS.AXE); });
+    case 'BLOODY_TEAR': return fireWeaponUsingTemplate('BLOODY_TEAR', 'WHIP', function () { useWhip(); });
+    case 'HEAVEN_SWORD': return fireWeaponUsingTemplate('HEAVEN_SWORD', 'BOW', function () { fireBow(); });
+    case 'THUNDER_LOOP': return fireWeaponUsingTemplate('THUNDER_LOOP', 'LIGHTNING_ROD', function () { fireLightningRod(); });
+    case 'LA_BORRA': return fireWeaponUsingTemplate('LA_BORRA', 'POTION', function () { firePotion(); });
+    case 'UNHOLY_VESPERS': return fireWeaponUsingTemplate('UNHOLY_VESPERS', 'GRIMOIRE', function () { fireGrimoire(); });
+    case 'SCEPTER': fireScepter(); return true;
+    case 'BOW': fireBow(); return true;
+    case 'BOOMERANG': fireBoomerang(); return true;
+    case 'SWORD': useMelee(WEAPONS.SWORD); return true;
+    case 'AXE': useMelee(WEAPONS.AXE); return true;
+    case 'SPEAR': useMelee(WEAPONS.SPEAR); return true;
+    case 'HAMMER': useMelee(WEAPONS.HAMMER); return true;
+    case 'DAGGERS': useMelee(WEAPONS.DAGGERS); return true;
+    case 'SCYTHE': useMelee(WEAPONS.SCYTHE); return true;
+    case 'KATANA': useMelee(WEAPONS.KATANA); return true;
+    case 'FLAIL': useMelee(WEAPONS.FLAIL); return true;
+    case 'GAUNTLETS': useMelee(WEAPONS.GAUNTLETS); return true;
+    case 'GRIMOIRE': fireGrimoire(); return true;
+    case 'WHIP': useWhip(); return true;
+    case 'CARDS': fireCards(); return true;
+    case 'PISTOL': firePistol(); return true;
+    case 'TRIDENT': fireTrident(); return true;
+    case 'RIFLE': fireRifle(); return true;
+    case 'SHURIKEN': fireShuriken(); return true;
+    case 'VOID_STAFF': fireVoidStaff(); return true;
+    case 'FIRE_STAFF': fireFireStaff(); return true;
+    case 'LEAF_BLADE': fireLeafBlade(); return true;
+    case 'POTION': firePotion(); return true;
+    case 'LUTE': useLute(); return true;
+    case 'WRENCH': useMelee(WEAPONS.WRENCH); return true;
+    case 'JAVELIN': fireJavelin(); return true;
+    case 'CROSSBOW': fireCrossbow(); return true;
+    case 'RUNESTONE': fireRunestone(); return true;
+    case 'RAPIER': useMelee(WEAPONS.RAPIER); return true;
+    case 'BOMB': fireBomb(); return true;
+    case 'TOTEM': useMelee(WEAPONS.TOTEM); return true;
+    case 'CLAWS': useMelee(WEAPONS.CLAWS); return true;
+    case 'MACE': useMelee(WEAPONS.MACE); return true;
+    case 'MIRROR': fireMirror(); return true;
+    case 'REVOLVER': fireRevolver(); return true;
+    case 'NEEDLES': fireNeedles(); return true;
+    case 'LIGHTNING_ROD': fireLightningRod(); return true;
+    case 'ARCANE_ORB': fireArcaneOrbit(); return true;
+    case 'SAW_BLADE': fireSawRing(); return true;
+    case 'BLOOD_LANCE': return fireWeaponUsingTemplate('BLOOD_LANCE', 'JAVELIN', function () { fireJavelin(); });
+    case 'CHAIN_LIGHTNING': fireChainLightningPulse('CHAIN_LIGHTNING'); return true;
+    case 'MAGIC_MISSILE': return fireWeaponUsingTemplate('MAGIC_MISSILE', 'SCEPTER', function () { fireScepter(); });
+    case 'SHADOW_DISC': return fireWeaponUsingTemplate('SHADOW_DISC', 'BOOMERANG', function () { fireBoomerang(); });
+    case 'CELESTIAL_SPEAR': return fireWeaponUsingTemplate('CELESTIAL_SPEAR', 'JAVELIN', function () { fireJavelin(); });
+    case 'PHANTOM_TAROT': return fireWeaponUsingTemplate('PHANTOM_TAROT', 'CARDS', function () { fireCards(); });
+    case 'DRAGON_SPARK': return fireWeaponUsingTemplate('DRAGON_SPARK', 'LIGHTNING_ROD', function () { fireLightningRod(); });
+    case 'SACRED_FLASK': return fireWeaponUsingTemplate('SACRED_FLASK', 'POTION', function () { firePotion(); });
+    case 'RAIL_LANCE': return fireWeaponUsingTemplate('RAIL_LANCE', 'JAVELIN', function () { fireJavelin(); });
+    case 'NOVA_TOME': fireNovaTomeWave(); return true;
+    case 'SIEGE_MORTAR': return fireWeaponUsingTemplate('SIEGE_MORTAR', 'BOMB', function () { fireBomb(); });
+    case 'FATE_NEEDLE': return fireWeaponUsingTemplate('FATE_NEEDLE', 'NEEDLES', function () { fireNeedles(); });
+    case 'ICE_BOW': fireIceBow(); return true;
+    case 'MOON_SHOT': return fireWeaponUsingTemplate('MOON_SHOT', 'BOW', function () { fireBow(); });
+    case 'PLASMA_GLAIVE': return fireWeaponUsingTemplate('PLASMA_GLAIVE', 'BOOMERANG', function () { fireBoomerang(); });
+    case 'RUNE_CANNON': return fireWeaponUsingTemplate('RUNE_CANNON', 'BOMB', function () { fireBomb(); });
+    case 'DAGGER_SAC': useMelee(WEAPONS.DAGGER_SAC); return true;
+    case 'DRILL': useMelee(WEAPONS.DRILL); return true;
+    case 'STAR_GLOBE': fireStarGlobe(); return true;
+    case 'CLEAVER': fireCleaver(); return true;
+    case 'BALLS': fireBalls(); return true;
+    case 'GREATSWORD': useMelee(WEAPONS.GREATSWORD); return true;
+    case 'ROCK': fireRock(); return true;
+    case 'BLOWGUN': fireBlowgun(); return true;
+    case 'GREATBOW': fireGreatbow(); return true;
+    case 'DARK_BLADE': useMelee(WEAPONS.DARK_BLADE); return true;
+    case 'SUN_STAFF': fireSunStaff(); return true;
+    case 'HOURGLASS': fireHourglass(); return true;
+      default: return false;
+    }
+  } finally {
+    GameState._currentFireWeaponId = prevWeaponCtx;
+  }
+}
+
+function fireLegacyActiveWeapon() {
+  if (WEAPONS.SCEPTER.active) fireScepter();
+  else if (WEAPONS.BOW.active) fireBow();
+  else if (WEAPONS.BOOMERANG.active) fireBoomerang();
+  else if (WEAPONS.SWORD.active) useMelee(WEAPONS.SWORD);
+  else if (WEAPONS.AXE.active) useMelee(WEAPONS.AXE);
+  else if (WEAPONS.SPEAR.active) useMelee(WEAPONS.SPEAR);
+  else if (WEAPONS.HAMMER.active) useMelee(WEAPONS.HAMMER);
+  else if (WEAPONS.DAGGERS.active) useMelee(WEAPONS.DAGGERS);
+  else if (WEAPONS.SCYTHE.active) useMelee(WEAPONS.SCYTHE);
+  else if (WEAPONS.KATANA.active) useMelee(WEAPONS.KATANA);
+  else if (WEAPONS.FLAIL.active) useMelee(WEAPONS.FLAIL);
+  else if (WEAPONS.GAUNTLETS.active) useMelee(WEAPONS.GAUNTLETS);
+  else if (WEAPONS.GRIMOIRE.active) fireGrimoire();
+  else if (WEAPONS.WHIP.active) useWhip();
+  else if (WEAPONS.CARDS.active) fireCards();
+  else if (WEAPONS.PISTOL.active) firePistol();
+  else if (WEAPONS.TRIDENT.active) fireTrident();
+  else if (WEAPONS.RIFLE.active) fireRifle();
+  else if (WEAPONS.SHURIKEN.active) fireShuriken();
+  else if (WEAPONS.VOID_STAFF.active) fireVoidStaff();
+  else if (WEAPONS.FIRE_STAFF.active) fireFireStaff();
+  else if (WEAPONS.LEAF_BLADE.active) fireLeafBlade();
+  else if (WEAPONS.POTION.active) firePotion();
+  else if (WEAPONS.LUTE.active) useLute();
+  else if (WEAPONS.WRENCH.active) useMelee(WEAPONS.WRENCH);
+  else if (WEAPONS.JAVELIN.active) fireJavelin();
+  else if (WEAPONS.CROSSBOW.active) fireCrossbow();
+  else if (WEAPONS.RUNESTONE.active) fireRunestone();
+  else if (WEAPONS.RAPIER.active) useMelee(WEAPONS.RAPIER);
+  else if (WEAPONS.BOMB.active) fireBomb();
+  else if (WEAPONS.TOTEM.active) useMelee(WEAPONS.TOTEM);
+  else if (WEAPONS.CLAWS.active) useMelee(WEAPONS.CLAWS);
+  else if (WEAPONS.MACE.active) useMelee(WEAPONS.MACE);
+  else if (WEAPONS.MIRROR.active) fireMirror();
+  else if (WEAPONS.REVOLVER.active) fireRevolver();
+  else if (WEAPONS.NEEDLES.active) fireNeedles();
+  else if (WEAPONS.LIGHTNING_ROD.active) fireLightningRod();
+  else if (WEAPONS.ICE_BOW.active) fireIceBow();
+  else if (WEAPONS.DAGGER_SAC.active) useMelee(WEAPONS.DAGGER_SAC);
+  else if (WEAPONS.DRILL.active) useMelee(WEAPONS.DRILL);
+  else if (WEAPONS.STAR_GLOBE.active) fireStarGlobe();
+  else if (WEAPONS.CLEAVER.active) fireCleaver();
+  else if (WEAPONS.BALLS.active) fireBalls();
+  else if (WEAPONS.GREATSWORD.active) useMelee(WEAPONS.GREATSWORD);
+  else if (WEAPONS.ROCK.active) fireRock();
+  else if (WEAPONS.BLOWGUN.active) fireBlowgun();
+  else if (WEAPONS.GREATBOW.active) fireGreatbow();
+  else if (WEAPONS.DARK_BLADE.active) useMelee(WEAPONS.DARK_BLADE);
+  else if (WEAPONS.SUN_STAFF.active) fireSunStaff();
+  else if (WEAPONS.HOURGLASS.active) fireHourglass();
+}
+
 function handleFire() {
-  if (document.pointerLockElement === renderer.domElement && !GameState.levelingUp) {
-    if (WEAPONS.SCEPTER.active) fireScepter();
-    else if (WEAPONS.BOW.active) fireBow();
-    else if (WEAPONS.BOOMERANG.active) fireBoomerang();
-    else if (WEAPONS.SWORD.active) useMelee(WEAPONS.SWORD);
-    else if (WEAPONS.AXE.active) useMelee(WEAPONS.AXE);
-    else if (WEAPONS.SPEAR.active) useMelee(WEAPONS.SPEAR);
-    else if (WEAPONS.HAMMER.active) useMelee(WEAPONS.HAMMER);
-    else if (WEAPONS.DAGGERS.active) useMelee(WEAPONS.DAGGERS);
-    else if (WEAPONS.SCYTHE.active) useMelee(WEAPONS.SCYTHE);
-    else if (WEAPONS.KATANA.active) useMelee(WEAPONS.KATANA);
-    else if (WEAPONS.FLAIL.active) useMelee(WEAPONS.FLAIL);
-    else if (WEAPONS.GAUNTLETS.active) useMelee(WEAPONS.GAUNTLETS);
-    else if (WEAPONS.GRIMOIRE.active) fireGrimoire();
-    else if (WEAPONS.WHIP.active) useWhip();
-    else if (WEAPONS.CARDS.active) fireCards();
-    else if (WEAPONS.PISTOL.active) firePistol();
-    else if (WEAPONS.TRIDENT.active) fireTrident();
-    else if (WEAPONS.RIFLE.active) fireRifle();
-    else if (WEAPONS.SHURIKEN.active) fireShuriken();
-    else if (WEAPONS.VOID_STAFF.active) fireVoidStaff();
-    else if (WEAPONS.FIRE_STAFF.active) fireFireStaff();
-    else if (WEAPONS.LEAF_BLADE.active) fireLeafBlade();
-    else if (WEAPONS.POTION.active) firePotion();
-    else if (WEAPONS.LUTE.active) useLute();
-    else if (WEAPONS.WRENCH.active) useMelee(WEAPONS.WRENCH);
-    else if (WEAPONS.JAVELIN.active) fireJavelin();
-    else if (WEAPONS.CROSSBOW.active) fireCrossbow();
-    else if (WEAPONS.RUNESTONE.active) fireRunestone();
-    else if (WEAPONS.RAPIER.active) useMelee(WEAPONS.RAPIER);
-    else if (WEAPONS.BOMB.active) fireBomb();
-    else if (WEAPONS.TOTEM.active) useMelee(WEAPONS.TOTEM);
-    else if (WEAPONS.CLAWS.active) useMelee(WEAPONS.CLAWS);
-    else if (WEAPONS.MACE.active) useMelee(WEAPONS.MACE);
-    else if (WEAPONS.MIRROR.active) fireMirror();
-    else if (WEAPONS.REVOLVER.active) fireRevolver();
-    else if (WEAPONS.NEEDLES.active) fireNeedles();
-    else if (WEAPONS.LIGHTNING_ROD.active) fireLightningRod();
-    else if (WEAPONS.ICE_BOW.active) fireIceBow();
-    else if (WEAPONS.DAGGER_SAC.active) useMelee(WEAPONS.DAGGER_SAC);
-    else if (WEAPONS.DRILL.active) useMelee(WEAPONS.DRILL);
-    else if (WEAPONS.STAR_GLOBE.active) fireStarGlobe();
-    else if (WEAPONS.CLEAVER.active) fireCleaver();
-    else if (WEAPONS.BALLS.active) fireBalls();
-    else if (WEAPONS.GREATSWORD.active) useMelee(WEAPONS.GREATSWORD);
-    else if (WEAPONS.ROCK.active) fireRock();
-    else if (WEAPONS.BLOWGUN.active) fireBlowgun();
-    else if (WEAPONS.GREATBOW.active) fireGreatbow();
-    else if (WEAPONS.DARK_BLADE.active) useMelee(WEAPONS.DARK_BLADE);
-    else if (WEAPONS.SUN_STAFF.active) fireSunStaff();
-    else if (WEAPONS.HOURGLASS.active) fireHourglass();
+  if (GameState.levelingUp) return;
+
+  const hasInventory = !!(GameState && GameState.inventory && Array.isArray(GameState.inventory.mainWeapons));
+  if (!hasInventory) {
+    if (document.pointerLockElement === renderer.domElement) fireLegacyActiveWeapon();
+    return;
+  }
+
+  // Flexible loadout: every equipped slot can be manually aimed (mouse buttons) and/or auto-assisted.
+  if (document.pointerLockElement === renderer.domElement && GameState.mainWeaponsEnabled !== false) {
+    const mains = Array.isArray(GameState.inventory.mainWeapons) ? GameState.inventory.mainWeapons : [];
+    const manualPressed = !!(mDown[0] || mDown[2]);
+    if (manualPressed) {
+      for (let i = 0; i < mains.length; i++) {
+        const slot = mains[i];
+        if (!slot || !slot.id) continue;
+        fireWeaponById(slot.id);
+      }
+    }
+  }
+
+  // Auto-assist pass: keeps all equipped weapons active even when no mouse button is held.
+  if (GameState.gameRunning && GameState.autoAttackEnabled !== false) {
+    const mains = Array.isArray(GameState.inventory.mainWeapons) ? GameState.inventory.mainWeapons : [];
+    GameState.autoAimDir = getNearestMonsterAimDir();
+    for (let i = 0; i < mains.length; i++) {
+      const slot = mains[i];
+      if (!slot || !slot.id) continue;
+      fireWeaponById(slot.id);
+    }
+
+    const autos = GameState.inventory.autoWeapons || [];
+    for (let i = 0; i < autos.length; i++) {
+      const slot = autos[i];
+      if (!slot || !slot.id) continue;
+      fireWeaponById(slot.id);
+    }
+    GameState.autoAimDir = null;
   }
 }
 

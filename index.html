@@ -38,21 +38,18 @@
           <span id="unlockText">Conditions de déblocage</span>
         </div>
       </div>
-      <!-- Weapon and Ability side by side -->
+      <!-- Loadout and movement side by side -->
       <div id="charWeaponAbilityRow">
         <div id="charWeaponBlock" class="char-info-block">
-          <h4><i class="fa-solid fa-sword"></i> ARME</h4>
-          <div id="weaponModelCanvas" class="weapon-preview-canvas"></div>
-          <div id="previewCharWeapon">
-            <span id="pWeaponName">SCEPTER</span>
-          </div>
-          <div id="pWeaponStats" class="mini-meta">DMG: -- | CD: --</div>
+          <h4><i class="fa-solid fa-layer-group"></i> LOADOUT</h4>
+          <div id="pLoadoutSummary" class="mini-meta">Arme initiale: --</div>
+          <div id="pCapacitySummary" class="mini-meta">Capacite d'armes: 6</div>
         </div>
         <div id="charAbilityBlock" class="char-info-block">
-          <h4><i class="fa-solid fa-bolt"></i> CAPACITÉ</h4>
+          <h4><i class="fa-solid fa-person-running"></i> MOUVEMENT</h4>
           <i id="pAbilityIcon" class="fa-solid fa-star" style="font-size:28px;color:#f0a030;text-align:center;margin:8px 0;"></i>
           <div id="pAbilityName">Aucune</div>
-          <div id="pAbilityDesc" class="mini-meta">Pas de capacité spéciale</div>
+          <div id="pAbilityDesc" class="mini-meta">Pas de compétence de mouvement</div>
         </div>
       </div>
     </div>
@@ -108,7 +105,7 @@
   <div class="divider"></div>
   <div class="ctrl">
     <span>W A S D</span> · Se déplacer &nbsp;|&nbsp; <span>ESPACE</span> · Sauter<br>
-    <span>SOURIS</span> · Regarder &nbsp;|&nbsp; <span>CLIC</span> · Tirer &nbsp;|&nbsp; <span>E</span> · Dash<br>
+    <span>SOURIS</span> · Regarder &nbsp;|&nbsp; <span>CLIC</span> · Tirer &nbsp;|&nbsp; <span>E</span> · Dash &nbsp;|&nbsp; <span>R</span> · Activer/Desactiver armes de visee<br>
     <span>LEVEL UP</span> · Choisissez une amélioration
   </div>
   
@@ -178,6 +175,10 @@
   <div id="mzfl"></div>
   <div id="lkhint">CLIQUEZ POUR CAPTURER LA SOURIS</div>
   <div id="scepterStats"></div>
+  <div id="runLoadoutHud">
+    <div id="runLoadoutLineWeapons"></div>
+    <div id="runLoadoutLinePassives"></div>
+  </div>
   <div id="dashInd">DASH [E]</div>
   <div id="bossbar"><div id="bossname">GARDIEN DES OMBRES</div><div id="bosstrk"><div id="bossfill" style="width:100%"></div></div></div>
 </div>
@@ -205,6 +206,8 @@
 <script src="biomes-list-config.js"></script>
 <script src="weapons-config.js"></script>
 <script src="upgrades-config.js"></script>
+<script src="items-config.js"></script>
+<script src="evolutions-config.js"></script>
 <script src="monsters-config.js"></script>
 <script src="perm-upgrades-config.js"></script>
 <script src="cosmetics-config.js"></script>
@@ -212,10 +215,32 @@
 <script src="ui-themes-config.js"></script>
 <script src="utils.js"></script>
 <script src="biomes-config.js"></script>
-<script src="entities.js"></script>
+<script src="entities-puppet-traits.js"></script>
+<script src="entities-puppet.js"></script>
+<script src="entities-animation.js"></script>
+<script src="entities-player-model.js"></script>
+<script src="entities-monster.js"></script>
 <script src="projectiles.js"></script>
-<script src="abilities.js"></script>
-<script src="ui.js"></script>
+<script src="abilities-combat.js"></script>
+<script src="abilities-passives.js"></script>
+<script src="abilities-specials.js"></script>
+<script src="abilities-weapon-visuals.js"></script>
+<script src="ui-core.js"></script>
+<script src="ui-gallery.js"></script>
+<script src="ui-hud.js"></script>
+<script src="ui-market.js"></script>
+<script src="ui-options.js"></script>
+<script src="ui-progression.js"></script>
+<script src="ui-selection.js"></script>
+<script src="ui-theme-quest.js"></script>
+<!-- Runtime modular overrides / ownership files -->
+<script src="game-world.js"></script>
+<script src="game-spawning.js"></script>
+<script src="game-environment.js"></script>
+<script src="game-runtime-ui.js"></script>
+<script src="game-progression.js"></script>
+<script src="game-bootstrap.js"></script>
+<script src="game-loadout.js"></script>
 <script>
   // Force l'initialisation de l'interface dès que possible
   window.addEventListener('DOMContentLoaded', () => {

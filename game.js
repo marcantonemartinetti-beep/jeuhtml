@@ -8,7 +8,7 @@ var scene, camera, renderer, clock;
 var playerPivot;
 var sunLight, fillLight, skyMat, minimapCtx;
 var groundTex;
-var vm, vmModel, vmRecoil = 0;
+var vm, vmModel, vmModelLeft, vmRecoil = 0;
 var SPD = 7.5;
 var playerModel, playerParts, playerTypeData;
 
@@ -26,6 +26,7 @@ var particles = [];
 var dmgNums = [];
 var chests = [];
 var xpOrbs = [];
+var cardDrops = [];
 
 // Sauvegarde de l'état initial des données pour la réinitialisation
 const INITIAL_WEAPONS = JSON.parse(JSON.stringify(WEAPONS));
@@ -33,7 +34,7 @@ const INITIAL_PASSIVES = JSON.parse(JSON.stringify(PASSIVES));
 
 const keys = {};
 const mDown = {};
-const keyState = { space: false };
+const keyState = { space: false, q: false, r: false };
 
 let lastCX = null, lastCZ = null;
 
@@ -70,894 +71,35 @@ var MATS = {
 };
 
 var scenerySpriteMatCache = {};
-function getScenerySpriteMat(token, colorHex, extra = {}) {
-  const key = `${token}_${colorHex}_${extra.depthWrite === false ? 0 : 1}`;
-  if (scenerySpriteMatCache[key]) return scenerySpriteMatCache[key];
-  scenerySpriteMatCache[key] = new THREE.SpriteMaterial({
-    map: getSceneryTex(token, colorHex),
-    depthWrite: extra.depthWrite !== false
-  });
-  return scenerySpriteMatCache[key];
-}
-
-// ==================== MATERIAL INITIALIZATION ====================
-function initStructureMaterials() {
-  // Pre-generate and cache structure materials to avoid GC pressure
-  MATS.stone = new THREE.MeshLambertMaterial({ map: genTex(0x666666, 'stone') });
-  MATS.wood = new THREE.MeshLambertMaterial({ map: genTex(0x5a4030, 'wood') });
-  MATS.dark = new THREE.MeshLambertMaterial({ map: genTex(0x222222) });
-  MATS.brick = new THREE.MeshLambertMaterial({ map: genTex(0x884444, 'stone') });
-  MATS.roof = MATS.brick; // Reuse brick texture
-  // Extra structure materials
-  MATS.fairy = new THREE.MeshLambertMaterial({color: 0xffaaff});
-  MATS.jungle = new THREE.MeshLambertMaterial({color: 0x228822});
-  MATS.coral = new THREE.MeshLambertMaterial({color:0xff88aa});
-  MATS.tent = new THREE.MeshLambertMaterial({color:0xff0000});
-  MATS.blockBlue = new THREE.MeshLambertMaterial({color:0x0000ff});
-  MATS.blockGreen = new THREE.MeshLambertMaterial({color:0x00ff00});
-  MATS.blockRed = new THREE.MeshLambertMaterial({color:0xff0000});
-}
-
-// ==================== TERRAIN ====================
-function createChunk(cx, cz) {
-  const S = 32;
-  const geo = new THREE.PlaneGeometry(CHUNK_SZ, CHUNK_SZ, S, S);
-  geo.rotateX(-Math.PI / 2);
-  const pos = geo.attributes.position.array;
-  
-  // Pre-allocate color array to avoid repeated push() allocations
-  const colorCount = (S + 1) * (S + 1); // Number of vertices
-  const cols = new Float32Array(colorCount * 3); // RGB per vertex
-  let colIdx = 0;
-  
-  for (let i = 0; i < pos.length; i += 3) {
-    const wx = pos[i] + cx, wz = pos[i + 2] + cz, h = terrainH(wx, wz);
-    pos[i + 1] = h;
-    const v = (h + 5) / 25 + noise2(wx * 0.2, wz * 0.2) * 0.1;
-    cols[colIdx++] = ((GameState.pBiome.col >> 16) & 255) / 255 * v;
-    cols[colIdx++] = ((GameState.pBiome.col >> 8) & 255) / 255 * v;
-    cols[colIdx++] = (GameState.pBiome.col & 255) / 255 * v;
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  geo.computeVertexNormals();
-  geo.attributes.position.needsUpdate = true;
-  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTex }));
-  m.receiveShadow = true;
-  m.position.set(cx, 0, cz);
-
-  // Scenery for this chunk
-  const grp = new THREE.Group();
-  grp.position.set(cx, 0, cz);
-  populateChunk(grp, cx, cz);
-
-  // Add Water for Islands
-  if (['pirate', 'ocean'].includes(GameState.pBiome.id)) {
-      const wGeo = new THREE.PlaneGeometry(CHUNK_SZ, CHUNK_SZ);
-      wGeo.rotateX(-Math.PI/2);
-      const wMat = new THREE.MeshBasicMaterial({color: 0x004488, transparent:true, opacity:0.7});
-      const water = new THREE.Mesh(wGeo, wMat);
-      water.position.y = -2;
-      grp.add(water);
-  }
-  
-  // Add Ceiling for Indoors
-  if (['dungeon', 'crypt', 'mine', 'sewer', 'lab', 'library', 'museum', 'asylum', 'kitchen', 'core'].includes(GameState.pBiome.id)) {
-      const cGeo = new THREE.PlaneGeometry(CHUNK_SZ, CHUNK_SZ);
-      cGeo.rotateX(Math.PI/2);
-      const cMat = new THREE.MeshBasicMaterial({color: 0x111111});
-      const ceil = new THREE.Mesh(cGeo, cMat);
-      ceil.position.y = 30;
-      grp.add(ceil);
-  }
-
-  scene.add(m);
-  scene.add(grp);
-  return { m, grp };
-}
-
-function updateTerrain(px, pz) {
-  const cx = Math.round(px / CHUNK_SZ), cz = Math.round(pz / CHUNK_SZ);
-  const drawDist = (GameState && GameState.saveData && GameState.saveData.settings && GameState.saveData.settings.particles === 0) ? 1 : DRAW_DIST;
-  const keep = new Set();
-  for (let x = -drawDist; x <= drawDist; x++) {
-    for (let z = -drawDist; z <= drawDist; z++) {
-      const k = `${cx + x},${cz + z}`;
-      keep.add(k);
-      if (!chunks[k]) chunks[k] = createChunk((cx + x) * CHUNK_SZ, (cz + z) * CHUNK_SZ);
-    }
-  }
-  for (const k in chunks) {
-    if (!keep.has(k)) {
-      scene.remove(chunks[k].m);
-      scene.remove(chunks[k].grp);
-      colliders = colliders.filter(c => c.chunkKey !== k);
-      chunks[k].m.geometry.dispose();
-      delete chunks[k];
-    }
-  }
-}
-
-// ==================== SCENERY ====================
-function buildStructure(biome, t, x, z, h) {
-  const g = new THREE.Group();
-  g.position.set(x, h, z);
-  const boxes = [];
-  const addBox = (w, h, d, px, py, pz) => {
-    boxes.push(new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(px, py, pz), new THREE.Vector3(w, h, d)));
-  };
-
-  // Use cached materials instead of creating new ones (GC optimization)
-  const mStone = MATS.stone;
-  const mWood = MATS.wood;
-  const mDark = MATS.dark;
-  const mIce = MATS.ice;
-  const mGold = MATS.gold;
-  const mBrick = MATS.brick;
-  const mWhite = MATS.white;
-  const mRed = MATS.red;
-  const mRoof = MATS.roof;
-
-  if (biome === 'samurai') {
-      if (t === 0) { // Torii Gate
-          const h = 10, w = 8;
-          const p1 = new THREE.Mesh(GEOS.cyl, mRed); p1.scale.set(1, h, 1); p1.position.set(-w/2, h/2, 0); g.add(p1);
-          const p2 = new THREE.Mesh(GEOS.cyl, mRed); p2.scale.set(1, h, 1); p2.position.set(w/2, h/2, 0); g.add(p2);
-          const top = new THREE.Mesh(GEOS.box, mRed); top.scale.set(w+4, 1, 1); top.position.set(0, h-1, 0); g.add(top);
-          const top2 = new THREE.Mesh(GEOS.box, mDark); top2.scale.set(w+2, 0.8, 0.8); top2.position.set(0, h-3, 0); g.add(top2);
-          addBox(w+2, h, 2, 0, h/2, 0);
-      } else { // Pagoda
-          const levels = 3;
-          for(let i=0; i<levels; i++) {
-              const s = 8 - i*2;
-              const y = i*5;
-              const b = new THREE.Mesh(GEOS.box, mWhite); b.scale.set(s, 4, s); b.position.y = y+2; g.add(b);
-              const r = new THREE.Mesh(GEOS.cone, mDark); r.scale.set(s+2, 2, s+2); r.position.y = y+4.5; g.add(r);
-              addBox(s, 4, s, 0, y+2, 0);
-          }
-      }
-  } else if (biome === 'wildwest') {
-      if (t === 0) { // Saloon
-          const w = 10, h = 6, d = 8;
-          const b = new THREE.Mesh(GEOS.box, mWood); b.scale.set(w, h, d); b.position.y = h/2; g.add(b);
-          const front = new THREE.Mesh(GEOS.box, mWood); front.scale.set(w, h+3, 0.5); front.position.set(0, (h+3)/2, d/2); g.add(front);
-          addBox(w, h, d, 0, h/2, 0);
-      } else { // Water Tower
-          const h = 10;
-          const legs = new THREE.Group();
-          for(let i=0; i<4; i++) {
-              const l = new THREE.Mesh(GEOS.cyl, mWood); l.scale.set(0.5, h, 0.5);
-              l.position.set((i%2?1:-1)*2, h/2, (i<2?1:-1)*2);
-              legs.add(l);
-          }
-          g.add(legs);
-          const tank = new THREE.Mesh(GEOS.cyl, mWood); tank.scale.set(3, 4, 3); tank.position.y = h+2; g.add(tank);
-          addBox(4, h+4, 4, 0, h/2, 0);
-      }
-  } else if (biome === 'plains' || biome === 'farm') {
-    if (t === 0) { // Château / Fort
-      const w = 12, h = 8;
-      const b = new THREE.Mesh(GEOS.box, mStone); b.scale.set(w, h, w); b.position.y = h/2; g.add(b); addBox(w, h, w, 0, h/2, 0);
-      // Towers corners
-      for(let i=0; i<4; i++) {
-        const tx = (i%2===0?1:-1)*w/2, tz = (i<2?1:-1)*w/2;
-        const tow = new THREE.Mesh(GEOS.cyl, mStone); tow.scale.set(2.5, h+4, 2.5); tow.position.set(tx, (h+4)/2, tz); g.add(tow);
-        const roof = new THREE.Mesh(GEOS.cone, mRed); roof.scale.set(3.5, 3, 3.5); roof.position.set(tx, h+4+1.5, tz); g.add(roof);
-      }
-      // Gate
-      const gate = new THREE.Mesh(GEOS.box, mDark); gate.scale.set(4, 5, 1); gate.position.set(0, 2.5, w/2+0.1); g.add(gate);
-    } else if (t === 1) { // Moulin
-      const b = new THREE.Mesh(GEOS.cyl, mWood); b.scale.set(3.5, 9, 3.5); b.position.y = 4.5; g.add(b); addBox(3.5, 9, 3.5, 0, 4.5, 0);
-      const roof = new THREE.Mesh(GEOS.cone, mDark); roof.scale.set(4, 3, 4); roof.position.y = 10.5; g.add(roof);
-      // Blades
-      const blades = new THREE.Group(); blades.position.set(0, 8, 2.5);
-      const b1 = new THREE.Mesh(GEOS.box, mWhite); b1.scale.set(14, 1, 0.2); blades.add(b1);
-      const b2 = new THREE.Mesh(GEOS.box, mWhite); b2.scale.set(1, 14, 0.2); blades.add(b2);
-      blades.rotation.z = Math.random(); // Static rotation
-      g.add(blades);
-    } else { // Barn
-      const w = 10, h = 6, d = 14;
-      const b = new THREE.Mesh(GEOS.box, mRed); b.scale.set(w, h, d); b.position.y = h/2; g.add(b);
-      const roof = new THREE.Mesh(GEOS.cone, mDark); roof.scale.set(w*1.2, 4, d*1.2); roof.position.y = h+2; 
-      g.add(roof);
-      addBox(w, h, d, 0, h/2, 0);
-    }
-  } else if (biome === 'graveyard' || biome === 'crypt') {
-    if (t === 0) { // Mausolée
-      const b = new THREE.Mesh(GEOS.box, mStone); b.scale.set(6, 6, 8); b.position.y = 3; g.add(b); addBox(6, 6, 8, 0, 3, 0);
-      const roof = new THREE.Mesh(GEOS.cyl, mDark); roof.scale.set(4, 8, 4); roof.position.y = 6; roof.rotation.z = Math.PI/2; g.add(roof);
-      const cols = [-2.5, 2.5];
-      cols.forEach(cx => {
-          const c = new THREE.Mesh(GEOS.cyl, mStone); c.scale.set(0.8, 6, 0.8); c.position.set(cx, 3, 4.2); g.add(c);
-      });
-    } else { // Giant Tombstone
-      const b = new THREE.Mesh(GEOS.box, mStone); b.scale.set(4, 8, 1.5); b.position.y = 4; g.add(b); addBox(4, 8, 1.5, 0, 4, 0);
-      const top = new THREE.Mesh(GEOS.cyl, mStone); top.scale.set(2, 1.5, 2); top.position.set(0, 8, 0); top.rotation.x = Math.PI/2; g.add(top);
-      const cross = new THREE.Mesh(GEOS.box, mDark); cross.scale.set(2, 3, 0.2); cross.position.set(0, 5, 0.8); g.add(cross);
-      const crossH = new THREE.Mesh(GEOS.box, mDark); crossH.scale.set(1.5, 0.8, 0.2); crossH.position.set(0, 5.5, 0.8); g.add(crossH);
-    }
-  } else if (biome === 'desert') {
-      if (t === 0) { // Pyramide
-          const b = new THREE.Mesh(GEOS.cone, mStone); b.scale.set(16, 12, 16); b.position.y = 6; b.rotation.y = Math.PI/4; g.add(b); addBox(14, 12, 14, 0, 6, 0);
-      } else if (t === 1) { // Sphinx-like
-          const body = new THREE.Mesh(GEOS.box, mStone); body.scale.set(6, 4, 10); body.position.y = 2; g.add(body);
-          const head = new THREE.Mesh(GEOS.sphere, mStone); head.scale.set(3, 3, 3); head.position.set(0, 5, 4); g.add(head);
-          addBox(6, 6, 10, 0, 3, 0);
-      } else { // Obelisk
-          const b = new THREE.Mesh(GEOS.box, mStone); b.scale.set(2, 12, 2); b.position.y = 6; g.add(b);
-          const top = new THREE.Mesh(GEOS.cone, mGold); top.scale.set(1.5, 2, 1.5); top.position.y = 13; g.add(top);
-          addBox(2, 12, 2, 0, 6, 0);
-      }
-  } else if (biome === 'forest' || biome === 'jungle' || biome === 'fairy' || biome === 'hive') {
-    if (t === 0) { // Giant Tree House
-      const trunk = new THREE.Mesh(GEOS.cyl, mWood); trunk.scale.set(5, 20, 5); trunk.position.y = 10; g.add(trunk); addBox(5, 20, 5, 0, 10, 0);
-      const house = new THREE.Mesh(GEOS.box, mWood); house.scale.set(8, 5, 8); house.position.y = 14; g.add(house);
-      const leaveMat = biome==='fairy' ? MATS.fairy : MATS.jungle;
-      const leaves = new THREE.Mesh(GEOS.dodec, leaveMat);
-      leaves.scale.set(14, 10, 14); leaves.position.y = 18; g.add(leaves);
-    } else { // Ancient Ruin Arch
-      const p1 = new THREE.Mesh(GEOS.box, mStone); p1.scale.set(2, 8, 2); p1.position.set(-3, 4, 0); g.add(p1);
-      const p2 = new THREE.Mesh(GEOS.box, mStone); p2.scale.set(2, 8, 2); p2.position.set(3, 4, 0); g.add(p2);
-      const top = new THREE.Mesh(GEOS.box, mStone); top.scale.set(10, 2, 3); top.position.set(0, 9, 0); g.add(top);
-      addBox(8, 10, 3, 0, 5, 0);
-    }
-  } else if (biome === 'snow' || biome === 'storm') {
-      if (t === 0) { // Ice Spire
-          const b = new THREE.Mesh(GEOS.cone, mIce); b.scale.set(4, 20, 4); b.position.y = 10; g.add(b); addBox(4, 20, 4, 0, 10, 0);
-          // Floating crystals around
-          for(let i=0; i<3; i++) {
-              const c = new THREE.Mesh(GEOS.oct, mIce); c.scale.set(1, 2, 1);
-              c.position.set(Math.cos(i*2)*5, 8+i*3, Math.sin(i*2)*5);
-              g.add(c);
-          }
-      } else { // Igloo Complex
-          const main = new THREE.Mesh(GEOS.sphere, mIce); main.scale.set(6, 5, 6); main.position.y = 0; g.add(main); addBox(6, 5, 6, 0, 2.5, 0);
-          const tunnel = new THREE.Mesh(GEOS.box, mIce); tunnel.scale.set(2, 2, 4); tunnel.position.set(0, 1, 5); g.add(tunnel);
-      }
-  } else if (biome === 'cyber' || biome === 'steampunk' || biome === 'clockwork' || biome === 'lab' || biome === 'alien' || biome === 'core') {
-    if (t === 0) { // Skyscraper
-      const h = 25 + Math.random()*15;
-      const b = new THREE.Mesh(GEOS.box, mDark); b.scale.set(8, h, 8); b.position.y = h/2; g.add(b); addBox(8, h, 8, 0, h/2, 0);
-      // Neon strips
-      const neonMat = biome==='cyber' ? MATS.neonGreen : MATS.neonOrange;
-      const n = new THREE.Mesh(GEOS.box, neonMat);
-      n.scale.set(8.2, h, 0.5); n.position.set(0, h/2, 4); g.add(n);
-    } else if (t === 1) { // Factory Pipes
-      const b = new THREE.Mesh(GEOS.box, mDark); b.scale.set(10, 6, 10); b.position.y = 3; g.add(b); addBox(10, 6, 10, 0, 3, 0);
-      for(let i=0; i<3; i++) {
-          const p = new THREE.Mesh(GEOS.cyl, mStone); p.scale.set(1, 10, 1); p.position.set(-3+i*3, 8, 0); g.add(p);
-          // Smoke (static sphere)
-          const s = new THREE.Mesh(GEOS.sphere, MATS.smoke);
-          s.scale.set(2, 2, 2); s.position.set(-3+i*3, 14, 0); g.add(s);
-      }
-    } else { // Server/Machine
-      const b = new THREE.Mesh(GEOS.box, mDark); b.scale.set(6, 8, 4); b.position.y = 4; g.add(b); addBox(6, 8, 4, 0, 4, 0);
-      const screen = new THREE.Mesh(GEOS.quad, MATS.cyan);
-      screen.scale.set(4, 3, 1); screen.position.set(0, 5, 2.1); g.add(screen);
-    }
-  } else if (biome === 'sky' || biome === 'heavens') {
-      if (t === 0) { // Greek Temple
-          const floor = new THREE.Mesh(GEOS.box, mWhite); floor.scale.set(12, 1, 16); floor.position.y = 0.5; g.add(floor);
-          const roof = new THREE.Mesh(GEOS.cone, mWhite); roof.scale.set(10, 4, 10); roof.position.y = 8; roof.rotation.y = Math.PI/4; g.add(roof);
-          for(let x=-4; x<=4; x+=4) for(let z=-6; z<=6; z+=4) {
-              const c = new THREE.Mesh(GEOS.cyl, mWhite); c.scale.set(0.8, 6, 0.8); c.position.set(x, 3.5, z); g.add(c);
-          }
-          addBox(12, 10, 16, 0, 5, 0);
-      } else { // Floating Ring
-          const r = new THREE.Mesh(GEOS.torus, mGold); r.scale.set(6, 6, 6); r.position.y = 8; g.add(r);
-          const base = new THREE.Mesh(GEOS.cone, mWhite); base.scale.set(4, 4, 4); base.position.y = 2; g.add(base);
-          addBox(6, 12, 2, 0, 6, 0);
-      }
-  } else if (biome === 'ocean' || biome === 'atlantis' || biome === 'pirate' || biome === 'deep') {
-      if (t === 0) { // Shipwreck
-          const hull = new THREE.Mesh(GEOS.box, mWood); hull.scale.set(4, 4, 12); hull.position.set(0, 2, 0); hull.rotation.z = 0.2; hull.rotation.x = 0.1; g.add(hull);
-          const mast = new THREE.Mesh(GEOS.cyl, mWood); mast.scale.set(0.5, 10, 0.5); mast.position.set(0, 6, 0); hull.add(mast);
-          addBox(6, 6, 14, 0, 3, 0);
-      } else { // Coral Arch
-          const arch = new THREE.Mesh(GEOS.torus, MATS.coral);
-          arch.scale.set(5, 5, 5); arch.position.y = 4; g.add(arch);
-          addBox(5, 8, 2, 0, 4, 0);
-      }
-  } else if (biome === 'candy' || biome === 'toy' || biome === 'circus') {
-      if (t === 0) { // Circus Tent
-          const tent = new THREE.Mesh(GEOS.cone, MATS.tent);
-          tent.scale.set(10, 8, 10); tent.position.y = 4; g.add(tent);
-          const top = new THREE.Mesh(GEOS.sphere, mGold); top.scale.set(1, 1, 1); top.position.y = 8; g.add(top);
-          addBox(10, 8, 10, 0, 4, 0);
-      } else { // Castle of Blocks
-          const b1 = new THREE.Mesh(GEOS.box, MATS.blockBlue); b1.scale.set(4, 4, 4); b1.position.set(-2, 2, 0); g.add(b1);
-          const b2 = new THREE.Mesh(GEOS.box, MATS.blockGreen); b2.scale.set(4, 4, 4); b2.position.set(2, 2, 0); g.add(b2);
-          const b3 = new THREE.Mesh(GEOS.box, MATS.blockRed); b3.scale.set(4, 4, 8); b3.position.set(0, 6, 0); g.add(b3);
-          addBox(8, 8, 8, 0, 4, 0);
-      }
-  } else if (biome === 'kitchen') {
-      if (t === 0) { // Giant Table
-          const leg1 = new THREE.Mesh(GEOS.box, mWood); leg1.scale.set(1, 8, 1); leg1.position.set(-4, 4, -4); g.add(leg1);
-          const leg2 = new THREE.Mesh(GEOS.box, mWood); leg2.scale.set(1, 8, 1); leg2.position.set(4, 4, -4); g.add(leg2);
-          const leg3 = new THREE.Mesh(GEOS.box, mWood); leg3.scale.set(1, 8, 1); leg3.position.set(-4, 4, 4); g.add(leg3);
-          const leg4 = new THREE.Mesh(GEOS.box, mWood); leg4.scale.set(1, 8, 1); leg4.position.set(4, 4, 4); g.add(leg4);
-          const top = new THREE.Mesh(GEOS.box, mWood); top.scale.set(12, 1, 12); top.position.y = 8.5; g.add(top);
-          addBox(10, 8, 10, 0, 4, 0);
-      } else { // Giant Fridge
-          const b = new THREE.Mesh(GEOS.box, mWhite); b.scale.set(6, 12, 6); b.position.y = 6; g.add(b); addBox(6, 12, 6, 0, 6, 0);
-      }
-  } else if (biome === 'library' || biome === 'museum') {
-      if (t === 0) { // Bookshelf / Display Case
-          const b = new THREE.Mesh(GEOS.box, mWood); b.scale.set(8, 10, 2); b.position.y = 5; g.add(b); addBox(8, 10, 2, 0, 5, 0);
-      } else { // Pillar
-          const c = new THREE.Mesh(GEOS.cyl, mStone); c.scale.set(2, 12, 2); c.position.y = 6; g.add(c); addBox(2, 12, 2, 0, 6, 0);
-      }
-  } else if (biome === 'music') {
-      if (t === 0) { // Giant Drum
-          const b = new THREE.Mesh(GEOS.cyl, mRed); b.scale.set(6, 4, 6); b.position.y = 2; g.add(b); addBox(6, 4, 6, 0, 2, 0);
-      } else { // Metronome shape
-          const b = new THREE.Mesh(GEOS.cone, mWood); b.scale.set(4, 10, 4); b.position.y = 5; g.add(b); addBox(4, 10, 4, 0, 5, 0);
-      }
-  } else if (biome === 'asylum') {
-      if (t === 0) { // Cell Block
-          const b = new THREE.Mesh(GEOS.box, mWhite); b.scale.set(8, 6, 8); b.position.y = 3; g.add(b); addBox(8, 6, 8, 0, 3, 0);
-          for(let i=-3; i<=3; i+=1.5) { const bar = new THREE.Mesh(GEOS.cyl, mDark); bar.scale.set(0.2, 6, 0.2); bar.position.set(i, 3, 4.1); g.add(bar); }
-      } else { // Watchtower
-          const b = new THREE.Mesh(GEOS.box, mBrick); b.scale.set(4, 12, 4); b.position.y = 6; g.add(b); addBox(4, 12, 4, 0, 6, 0);
-      }
-  } else if (biome === 'prehistoric') {
-      if (t === 0) { // Cave Entrance
-          const b = new THREE.Mesh(GEOS.sphere, mStone); b.scale.set(8, 6, 8); b.position.y = 0; g.add(b); addBox(8, 6, 8, 0, 3, 0);
-      } else { // Giant Bone Rib
-          const b = new THREE.Mesh(GEOS.torus, mWhite); b.scale.set(4, 4, 4); b.position.y = 0; b.rotation.x = Math.PI/2; g.add(b);
-          addBox(8, 4, 2, 0, 2, 0);
-      }
-  } else if (biome === 'void' || biome === 'chaos' || biome === 'shadow' || biome === 'omega' || biome === 'abyss' || biome === 'warp') {
-    if (t === 0) { // Monolithe
-      const b = new THREE.Mesh(GEOS.box, mDark);
-      b.scale.set(2, 15, 2);
-      b.position.y = 7.5;
-      g.add(b);
-      addBox(2, 15, 2, 0, 7.5, 0);
-    } else if (t === 1) { // Cube
-      const b = new THREE.Mesh(GEOS.box, mDark);
-      b.scale.set(4, 4, 4);
-      b.position.y = 6;
-      g.add(b);
-      addBox(4, 4, 4, 0, 6, 0);
-    } else { // Spire
-      const b = new THREE.Mesh(GEOS.cone, mDark);
-      b.scale.set(3, 12, 3);
-      b.position.y = 6;
-      b.rotation.x = Math.PI;
-      g.add(b);
-      addBox(3, 12, 3, 0, 6, 0);
-    }
-  } else if (biome === 'crystal') {
-    if (t === 0) { // Grand Cristal
-      const b = new THREE.Mesh(GEOS.oct, mIce); b.scale.set(4, 10, 4); b.position.y = 5; g.add(b); addBox(4, 10, 4, 0, 5, 0);
-    } else if (t === 1) { // Cluster
-      const b = new THREE.Mesh(GEOS.dodec, mIce); b.scale.set(6, 6, 6); b.position.y = 3; g.add(b); addBox(6, 6, 6, 0, 3, 0);
-    } else { // Spire
-      const b = new THREE.Mesh(GEOS.cone, mIce); b.scale.set(2, 12, 2); b.position.y = 6; g.add(b); addBox(2, 12, 2, 0, 6, 0);
-    }
-  } else if (biome === 'web') {
-    if (t === 0) { // Giant Web
-      for(let i=0; i<8; i++) {
-        const strand = new THREE.Mesh(GEOS.cyl, mWhite); strand.scale.set(0.1, 15, 0.1); strand.rotation.z = i/8 * Math.PI; g.add(strand);
-      }
-      addBox(15, 1, 15, 0, 0, 0);
-    }
-  } else { // Default (Swamp, Magma, Ocean)
-    if (t === 0) { // Tower
-      const b = new THREE.Mesh(GEOS.cyl, mStone); b.scale.set(3, 12, 3); b.position.y = 6; g.add(b); addBox(3, 12, 3, 0, 6, 0);
-      const top = new THREE.Mesh(GEOS.cone, mDark); top.scale.set(4, 4, 4); top.position.y = 14; g.add(top);
-    } else { // Ruins
-      const w1 = new THREE.Mesh(GEOS.box, mStone); w1.scale.set(6, 4, 1); w1.position.set(0, 2, -3); g.add(w1);
-      const w2 = new THREE.Mesh(GEOS.box, mStone); w2.scale.set(1, 6, 6); w2.position.set(-3, 3, 0); g.add(w2);
-      addBox(6, 6, 6, 0, 3, 0);
-    }
-  }
-  // Biome signature layer: each stage gets a distinct ornament language.
-  const bInfo = (typeof BIOMES !== 'undefined' && BIOMES) ? BIOMES.find(b => b.id === biome) : null;
-  const accent = bInfo ? bInfo.col : 0x888888;
-  let bseed = 0;
-  for (let i = 0; i < biome.length; i++) bseed = (bseed * 131 + biome.charCodeAt(i)) % 1000003;
-  const sig = bseed % 4;
-  const mAccent = new THREE.MeshLambertMaterial({ color: accent });
-
-  if (sig === 0) {
-    const ring = new THREE.Mesh(GEOS.torus, mAccent);
-    ring.scale.set(1.8, 1.8, 1.8);
-    ring.position.y = 9 + (bseed % 4);
-    g.add(ring);
-  } else if (sig === 1) {
-    for (let i = 0; i < 3; i++) {
-      const p = new THREE.Mesh(GEOS.oct, mAccent);
-      p.scale.set(0.8, 1.2, 0.8);
-      p.position.set(Math.cos(i * 2.1) * 4, 6 + i * 1.2, Math.sin(i * 2.1) * 4);
-      g.add(p);
-    }
-  } else if (sig === 2) {
-    const crown = new THREE.Mesh(GEOS.cone, mAccent);
-    crown.scale.set(1.4, 2.6, 1.4);
-    crown.position.y = 11 + (bseed % 3);
-    g.add(crown);
-  } else {
-    const core = new THREE.Mesh(GEOS.sphere, mAccent);
-    core.scale.set(1.1, 1.1, 1.1);
-    core.position.y = 8 + (bseed % 5) * 0.5;
-    g.add(core);
-  }
-
-  return { mesh: g, colliders: boxes };
-}
-
-function populateChunk(grp, cx, cz) {
-  const biomeId = GameState.pBiome.id;
-  const fx = GameState.biomeFx || getBiomeProfile(GameState.pBiome);
-  const lowFx = GameState.saveData && GameState.saveData.settings && GameState.saveData.settings.particles === 0;
-  const spriteDensityMult = (fx.spriteDensityMult || 1) * (lowFx ? 0.55 : 1.0);
-
-  // Biome-specific scenery variants (pair of types per biome)
-  const biomeTreeMap = {
-    'plains': ['tree', 'tree'], 'farm': ['tree', 'crate'], 'desert': ['cactus', 'rock'], 'wildwest': ['cactus', 'crate'],
-    'forest': ['dead', 'tree'], 'jungle': ['organic', 'dead'], 'fairy': ['tree', 'mushroom'], 'hive': ['organic', 'mushroom'],
-    'snow': ['pine', 'rock'], 'storm': ['pine', 'dead'], 'swamp': ['dead', 'organic'], 'graveyard': ['tombstone', 'dead'],
-    'magma': ['rock', 'crystal'], 'volcano': ['rock', 'crystal'], 'ocean': ['coral', 'rock'], 'pirate': ['coral', 'crate'],
-    'samurai': ['pillar', 'tree'], 'dungeon': ['pillar', 'pillar'], 'void': ['crystal', 'crystal'], 'cyber': ['tech', 'tech']
-  };
-  const biomeRockMap = {
-    'plains': ['rock', 'rock'], 'farm': ['rock', 'rock'], 'desert': ['rock', 'rock'], 'wildwest': ['rock', 'crate'],
-    'forest': ['rock', 'organic'], 'jungle': ['organic', 'organic'], 'fairy': ['mushroom', 'crystal'],
-    'snow': ['crystal', 'crystal'], 'magma': ['crystal', 'rock'], 'ocean': ['rock', 'coral'], 'pirate': ['crate', 'rock'],
-    'samurai': ['pillar', 'rock'], 'dungeon': ['pillar', 'pillar'], 'void': ['crystal', 'crystal'], 'cyber': ['pillar', 'tech']
-  };
-
-  const treeOpts = biomeTreeMap[biomeId] || ['tree', 'rock'];
-  const rockOpts = biomeRockMap[biomeId] || ['rock', 'crystal'];
-
-  const c = new THREE.Color(GameState.pBiome.col);
-  const treeCol1 = new THREE.Color(c).offsetHSL(0.08, 0.15, 0.02).getHex();
-  const treeCol2 = new THREE.Color(c).offsetHSL(-0.05, 0.08, -0.05).getHex();
-  const rockCol1 = new THREE.Color(GameState.pBiome.fog).offsetHSL(-0.04, -0.1, -0.15).getHex();
-  const rockCol2 = new THREE.Color(GameState.pBiome.fog).offsetHSL(0.02, 0.05, 0.1).getHex();
-  const grassCol = new THREE.Color(c).offsetHSL(0.02, 0.1, -0.1).getHex();
-
-  const noGrassBiomes = ['dungeon', 'prison', 'mine', 'library', 'asylum', 'museum', 'magma', 'volcano', 'core', 'void', 'shadow', 'abyss', 'warp', 'chaos', 'omega', 'cyber', 'steampunk', 'clockwork', 'lab', 'alien', 'web'];
-  const hasGrass = !noGrassBiomes.includes(biomeId);
-
-  const tMat1 = getScenerySpriteMat(`${treeOpts[0]}@${biomeId}`, treeCol1);
-  const tMat2 = getScenerySpriteMat(`${treeOpts[1]}@${biomeId}`, treeCol2);
-  const rMat1 = getScenerySpriteMat(`${rockOpts[0]}@${biomeId}`, rockCol1);
-  const rMat2 = getScenerySpriteMat(`${rockOpts[1]}@${biomeId}`, rockCol2);
-  const gMat = hasGrass ? getScenerySpriteMat('grass', grassCol, { depthWrite: false }) : null;
-
-  const indoorBiomes = ['dungeon', 'prison', 'mine', 'library', 'asylum', 'museum', 'lab', 'kitchen', 'crypt'];
-  const isIndoor = indoorBiomes.includes(biomeId) || fx.terrainArchetype === 'maze';
-  const treeFactor = isIndoor ? 0.15 : 1;
-  const rockFactor = isIndoor ? 0.45 : 1;
-  const grassFactor = isIndoor ? 0.0 : 1;
-
-  // Dense trees with clustering for natural grouping
-  const treeCount = Math.floor(fx.treeDensity * 1.05 * spriteDensityMult * treeFactor);
-  for (let i = 0; i < treeCount; i++) {
-    const clusterIdx = Math.floor(i / 4);
-    const inCluster = i % 4;
-    const h1 = hash(cx * 0.07 + cz * 0.13 + clusterIdx * 11), h2 = hash(cx * 0.21 - cz * 0.09 + clusterIdx * 17);
-    let lx = (h1 - 0.5) * CHUNK_SZ * 0.85, lz = (h2 - 0.5) * CHUNK_SZ * 0.85;
-    // Cluster offset: trees grouped together naturally
-    if (inCluster > 0) {
-      const coff = hash(clusterIdx * 31 + inCluster);
-      lx += (coff - 0.5) * 12;
-      lz += (hash(clusterIdx * 37 + inCluster) - 0.5) * 12;
-    }
-    const h = terrainH(cx + lx, cz + lz);
-    const s = 5 + hash(i * 3) * 5;
-    const tMat = hash(i * 7) < 0.5 ? tMat1 : tMat2;
-    const sp = new THREE.Sprite(tMat);
-    sp.center.set(0.5, 0);
-    sp.position.set(lx, h, lz);
-    sp.scale.set(s, s, 1);
-    grp.add(sp);
-  }
-
-  // Dense rocks with clustering
-  const rockCount = Math.floor(fx.rockDensity * 1.05 * spriteDensityMult * rockFactor);
-  for (let i = 0; i < rockCount; i++) {
-    const clusterIdx = Math.floor(i / 3);
-    const inCluster = i % 3;
-    const h1 = hash(cx * 0.15 + cz * 0.08 + clusterIdx * 13), h2 = hash(cx * 0.11 - cz * 0.19 + clusterIdx * 23);
-    let lx = (h1 - 0.5) * CHUNK_SZ * 0.88, lz = (h2 - 0.5) * CHUNK_SZ * 0.88;
-    // Cluster offset: rocks grouped together naturally
-    if (inCluster > 0) {
-      const coff = hash(clusterIdx * 29 + inCluster);
-      lx += (coff - 0.5) * 10;
-      lz += (hash(clusterIdx * 41 + inCluster) - 0.5) * 10;
-    }
-    const h = terrainH(cx + lx, cz + lz);
-    const s = 0.8 + hash(i * 2) * 2.2;
-    const rMat = hash(i * 5) < 0.5 ? rMat1 : rMat2;
-    const sp = new THREE.Sprite(rMat);
-    sp.center.set(0.5, 0);
-    sp.position.set(lx, h, lz);
-    sp.scale.set(s, s, 1);
-    grp.add(sp);
-  }
-
-  // Grass
-  if (gMat) {
-    const grassCount = Math.floor(fx.grassDensity * 0.30 * spriteDensityMult * grassFactor);
-    for (let i = 0; i < grassCount; i++) {
-      const h1 = hash(cx * 0.12 - cz * 0.06 + i * 3.3), h2 = hash(cx * 0.08 + cz * 0.14 + i * 9.1);
-      const lx = (h1 - 0.5) * CHUNK_SZ, lz = (h2 - 0.5) * CHUNK_SZ;
-      const h = terrainH(cx + lx, cz + lz);
-      const sp = new THREE.Sprite(gMat);
-      sp.center.set(0.5, 0);
-      sp.position.set(lx, h, lz);
-      sp.scale.set(1.2, 1.2, 1);
-      grp.add(sp);
-    }
-  }
-
-  // Unique complex structures per biome with collisions
-  const structChanceByBiome = {
-    'plains': 0.24, 'farm': 0.28, 'desert': 0.18, 'wildwest': 0.22, 'forest': 0.14, 'jungle': 0.16,
-    'fairy': 0.20, 'hive': 0.12, 'snow': 0.16, 'storm': 0.14, 'swamp': 0.15, 'graveyard': 0.20,
-    'magma': 0.10, 'volcano': 0.10, 'ocean': 0.12, 'pirate': 0.18, 'samurai': 0.22, 'dungeon': 0.25,
-    'void': 0.08, 'cyber': 0.26, 'steampunk': 0.24, 'clockwork': 0.23, 'lab': 0.22, 'alien': 0.20,
-    'sky': 0.18, 'heavens': 0.15, 'candy': 0.20, 'toy': 0.22, 'circus': 0.18,
-    'kitchen': 0.20, 'library': 0.24, 'museum': 0.22, 'music': 0.18, 'asylum': 0.18, 'prehistoric': 0.16, 'core': 0.12
-  };
-
-  const structChance = structChanceByBiome[biomeId] || 0.20;
-  const structSeed = hash(cx * 73 + cz * 97);
-  const structCount = Math.floor((structChance * 3) + 0.5); // 0-3 structures per chunk based on Biome
-
-  for (let s = 0; s < structCount; s++) {
-    const seed4struct = hash(cx * 11 + cz * 13 + s * 17);
-    if (hash(seed4struct) > structChance) continue; // Early exit based on chance
-
-    // Deterministic unique-ish structure position within chunk
-    const structX = (hash(seed4struct * 2.1) - 0.5) * CHUNK_SZ * 0.7;
-    const structZ = (hash(seed4struct * 3.3) - 0.5) * CHUNK_SZ * 0.7;
-    const h = terrainH(cx + structX, cz + structZ);
-
-    // Select structure type based on biome seed
-    const numStructTypes = Math.floor(hash(seed4struct * 7.1) * 3) + 0; // 0-2 structure types per biome
-    const structType = Math.min(2, numStructTypes);
-
-    // Build the structure with collisions
-    const { mesh, colliders: boxes } = buildStructure(biomeId, structType, 0, 0, 0);
-    
-    // Position structure
-    mesh.position.set(structX, h, structZ);
-    grp.add(mesh);
-
-    // Add collision boxes to world colliders with chunk key
-    if (boxes && boxes.length > 0) {
-      boxes.forEach(box => {
-        // Translate box to world coordinates
-        const worldBox = new THREE.Box3();
-        worldBox.copy(box);
-        const offset = new THREE.Vector3(cx + structX, h, cz + structZ);
-        worldBox.translate(offset);
-        colliders.push({
-          box: worldBox,
-          chunkKey: `${Math.round(cx / CHUNK_SZ)},${Math.round(cz / CHUNK_SZ)}`
-        });
-      });
-    }
-  }
-}
+// World generation and structure logic are owned by `game-world.js`.
+// Keep only shared cache object here so existing references stay valid.
 
 // Export game state and functions
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { GameState, createChunk, updateTerrain, buildStructure, populateChunk };
+  module.exports = { GameState };
 }
 
-// ==================== MISSING CORE FUNCTIONS ====================
-
-// Biome configuration functions now in biomes-config.js
-
-// Spawning
-let spawnTimer = 3; // Démarrage plus rapide pour créer swarm
-let chestTimer = 15;
-let biomeHazardTimer = 4.0;
-let bossSpawnTimer = 60; // Boss toutes les minutes
-let nextBossTime = 60; // Premier boss à 1 minute
-
-// Fonction manquante pour les tremblements d'écran
-window.addScreenShake = function(amount) {
-  // Implémentation simple ou vide pour éviter le crash
-  // camPitch += (Math.random() - 0.5) * amount;
-};
-
-window.checkBossUnlocks = function() {
-  let newUnlock = false;
-  CLASSES.forEach(c => {
-    if (c.linkedBiome && !GameState.saveData.unlockedClasses.includes(c.id)) {
-      const b = BIOMES.find(x => x.id === c.linkedBiome);
-      if (b) {
-        const allMobs = [...b.mobs, b.boss];
-        const hasAll = allMobs.every(m => GameState.saveData.cards.includes(m));
-        if (hasAll) {
-          GameState.saveData.unlockedClasses.push(c.id);
-          addNotif(`🔓 Personnage débloqué: ${c.name}`, '#00ff00');
-          newUnlock = true;
-        }
-      }
-    }
-  });
-  if (newUnlock && window.saveGame) window.saveGame();
-};
-
-function doSpawn() {
-  if (GameState.finalBossSpawned) return;
-  const pp = playerPivot.position;
-  const fx = GameState.biomeFx || { packSizeMult: 1, spawnRadiusMin: 15, spawnRadiusMax: 25 };
-  
-  // Limite augmentée progressivement (style Vampire Survivors)
-  const loopBonus = GameState.loopLevel * 20; // +20 ennemis par loop
-  const maxMonsters = 60 + loopBonus + Math.min(80, Math.floor(GameState.pT / 60)); // Max 140+ avec le temps
-  if (monsters.length >= maxMonsters) return;
-  
-  // Spawn TRÈS agressif pour effet swarm (plus de mobs + progression rapide)
-  const baseN = 4 + Math.floor(GameState.pT / 10); // +1 mob tous les 10 sec (au lieu de 15)
-  const n = Math.max(3, Math.floor(baseN * fx.packSizeMult)); // Min 3 par spawn
-  for (let i = 0; i < n; i++) {
-    if (monsters.length >= maxMonsters) break;
-    const a = Math.random() * Math.PI * 2;
-    // Spawn plus proche pour swarm (15-25 au lieu de 26-40)
-    const d = fx.spawnRadiusMin + Math.random() * Math.max(4, fx.spawnRadiusMax - fx.spawnRadiusMin);
-    monsters.push(new Monster(pp.x + Math.cos(a) * d, pp.z + Math.sin(a) * d));
-  }
-}
-
-function checkBoss() {
-  const fx = GameState.biomeFx || { eliteBossTime: 300 };
-  
-  // Boss final à 5 minutes (300 secondes)
-  if (!GameState.finalBossSpawned && GameState.pT >= fx.eliteBossTime) {
-    GameState.finalBossSpawned = true;
-    GameState.bossAlive = true;
-    monsters.forEach(m => scene.remove(m.root));
-    monsters = [];
-    
-    const pp = playerPivot.position;
-    const a = camYaw;
-    const d = 40;
-    
-    // Boss final = mob du biome en version géante
-    const bossName = GameState.pBiome ? GameState.pBiome.boss : 'Adam';
-    const bossIdx = MTYPES.findIndex(m => m.name === bossName);
-    const boss = new Monster(pp.x + Math.cos(a) * d, pp.z + Math.sin(a) * d, bossIdx !== -1 ? bossIdx : (MTYPES.length - 1));
-    boss.makeFinalBoss();
-    monsters.push(boss);
-    
-    document.getElementById('bossbar').style.display = 'block';
-    document.getElementById('bossname').textContent = '👑 ' + boss.T.name.toUpperCase() + ' 👑';
-    addNotif('⚠ BOSS FINAL: ' + boss.T.name.toUpperCase() + ' !', '#ffaa00');
-    return;
-  }
-  
-  // Boss intermédiaires chaque minute
-  if (!GameState.finalBossSpawned && !GameState.bossAlive && GameState.pT >= nextBossTime) {
-    nextBossTime += 60; // Prochain boss dans 1 minute
-    GameState.bossAlive = true;
-    
-    const pp = playerPivot.position;
-    const a = Math.random() * Math.PI * 2;
-    const d = 30;
-    
-    // Boss = mob aléatoire du biome en géant
-    const boss = new Monster(pp.x + Math.cos(a) * d, pp.z + Math.sin(a) * d);
-    boss.makeBoss();
-    monsters.push(boss);
-    
-    document.getElementById('bossbar').style.display = 'block';
-    document.getElementById('bossname').textContent = '⚔ ' + boss.T.name.toUpperCase();
-    addNotif('⚠ BOSS GÉANT: ' + boss.T.name.toUpperCase() + ' !', '#ff3300');
-  }
-}
-
-function applyBiomeHazard(dt) {
-  if (!GameState || !GameState.biomeFx || !GameState.gameRunning || GameState.levelingUp) return;
-  if (GameState.biomeSlowTimer > 0) GameState.biomeSlowTimer = Math.max(0, GameState.biomeSlowTimer - dt);
-  if (GameState.finalBossSpawned) return;
-
-  biomeHazardTimer -= dt;
-  if (biomeHazardTimer > 0) return;
-
-  const fx = GameState.biomeFx;
-  biomeHazardTimer = fx.hazardInterval;
-  const rawDmg = 2.0 * fx.hazardPower * (1 + (GameState.pBiome ? (GameState.pBiome.diff - 1) * 0.08 : 0));
-  const dmg = Math.max(0.5, rawDmg * (1 - Math.min(0.8, GameState.pDmgRed || 0)));
-
-  if (fx.hazardType === 'burn') {
-    GameState.pHP -= dmg;
-    spawnPart(playerPivot.position.clone(), 0xff5522, 6, 3);
-  } else if (fx.hazardType === 'frost') {
-    GameState.biomeSlowTimer = Math.max(GameState.biomeSlowTimer || 0, 1.8);
-    spawnPart(playerPivot.position.clone(), 0xaaddff, 5, 2.5);
-  } else if (fx.hazardType === 'poison') {
-    GameState.pHP -= dmg * 0.85;
-    spawnPart(playerPivot.position.clone(), 0x44aa44, 6, 2.2);
-  } else if (fx.hazardType === 'tide') {
-    const dir = fwd().setY(0).normalize();
-    playerPivot.position.addScaledVector(dir, -0.8 * fx.hazardPower);
-    spawnPart(playerPivot.position.clone(), 0x44aaff, 5, 2.0);
-  } else if (fx.hazardType === 'voidPulse') {
-    GameState.pHP -= dmg * 0.65;
-    playerPivot.position.x += (Math.random() - 0.5) * 1.2;
-    playerPivot.position.z += (Math.random() - 0.5) * 1.2;
-    spawnPart(playerPivot.position.clone(), 0xaa00ff, 7, 3.2);
-  } else if (fx.hazardType === 'overload') {
-    GameState.pHP -= dmg * 0.5;
-    if (typeof window.addScreenShake === 'function') window.addScreenShake(0.05);
-    spawnPart(playerPivot.position.clone(), 0x00ffaa, 6, 2.6);
-  } else if (fx.hazardType === 'sand') {
-    GameState.biomeSlowTimer = Math.max(GameState.biomeSlowTimer || 0, 1.2);
-    spawnPart(playerPivot.position.clone(), 0xccaa66, 4, 1.8);
-  }
-
-  if (GameState.pHP <= 0) gameOver();
-}
-
-// ==================== DAY/NIGHT ====================
-function updateDayNight(dt) {
-  if (!skyMat) return;
-  if (GameState.finalBossSpawned) {
-    const bloodTop = new THREE.Color(0x2a0505), bloodBot = new THREE.Color(0x8a1a1a);
-    const bloodFog = new THREE.Color(0x4a1a1a);
-    skyMat.uniforms.tC.value.lerp(bloodTop, dt * 0.8);
-    skyMat.uniforms.bC.value.lerp(bloodBot, dt * 0.8);
-    scene.fog.color.lerp(bloodFog, dt * 0.8);
-    renderer.setClearColor(scene.fog.color);
-    sunLight.color.lerp(new THREE.Color(0xff3333), dt * 0.8);
-    sunLight.intensity += (1.2 - sunLight.intensity) * dt * 0.8;
-    return;
-  }
-  sunLight.position.set(50, 100, 40);
-  sunLight.intensity = 1.1;
-  fillLight.intensity = 0.3;
-  sunLight.color.setHex(0xffe8cc);
-  skyMat.uniforms.tC.value.setHex(0x1a3a6a);
-  skyMat.uniforms.bC.value.setHex(GameState.pBiome ? GameState.pBiome.fog : 0x7ab0d8);
-  if (GameState.pBiome) {
-    scene.fog.color.setHex(GameState.pBiome.fog);
-    renderer.setClearColor(GameState.pBiome.fog);
-  }
-}
-
-// ==================== XP ====================
-function addXP(n) {
-  GameState.pXP += n;
-  const oldLvl = GameState.pLevel;
-  GameState.pLevel = 1 + Math.floor(GameState.pXP / 500);
-  if (GameState.pLevel > oldLvl) {
-    GameState.pMaxHP = 100 + (GameState.pLevel - 1) * 20;
-    GameState.pHP = GameState.pMaxHP;
-    const r = 1.1, rc = 0.95;
-    
-    // Upgrade active weapon
-    for (const k in WEAPONS) {
-        if (WEAPONS[k].active) {
-            WEAPONS[k].dmg *= r; WEAPONS[k].maxCd *= rc; WEAPONS[k].level++;
-        }
-    }
-    updateWeaponVisuals();
-    showLevelUp();
-  }
-  const xpFill = document.getElementById('xpfill');
-  if (xpFill) xpFill.style.width = ((GameState.pXP % 500) / 500 * 100) + '%';
-}
-
-// ==================== GAME OVER / WIN ====================
-function gameOver(showFullStats = false) {
-  GameState.gameRunning = false;
-  document.exitPointerLock();
-  document.getElementById('hud').style.display = 'none';
-  document.getElementById('overlay').style.display = 'flex';
-  
-  // Compute final stats
-  const totalTime = GameState.totalPlayTime + GameState.pT;
-  const totalKills = GameState.totalKills + GameState.pKills;
-  const minutes = Math.floor(totalTime / 60);
-  const seconds = Math.floor(totalTime % 60);
-  
-  let statsHTML = '';
-  if (showFullStats) {
-    statsHTML = `
-      <div style="max-width:600px;margin:auto;text-align:left;color:#e0e0e0;font-size:14px;line-height:1.6;">
-        <h3 style="color:#f0c030;text-align:center;margin-bottom:15px;">📊 STATISTIQUES COMPLÈTES</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;">
-          <div>🏆 <b>Loops Complétés:</b></div><div style="text-align:right;">${GameState.loopLevel}</div>
-          <div>⏱ <b>Temps Total:</b></div><div style="text-align:right;">${minutes}m ${seconds}s</div>
-          <div>💀 <b>Total Tués:</b></div><div style="text-align:right;">${totalKills}</div>
-          <div>📈 <b>Niveau Final:</b></div><div style="text-align:right;">${GameState.pLevel}</div>
-          <div>⭐ <b>Score Final:</b></div><div style="text-align:right;">${Math.floor(GameState.pScore)}</div>
-          <div>🗺 <b>Biome:</b></div><div style="text-align:right;">${GameState.pBiome.name}</div>
-          <div>👤 <b>Classe:</b></div><div style="text-align:right;">${GameState.pClass.name}</div>
-        </div>
-      </div>
-    `;
-  }
-  
-  const loopText = GameState.loopLevel > 0 ? ` (Loop ${GameState.loopLevel})` : '';
-  document.getElementById('overlay').innerHTML = `
-    <h1 style="color:#aa2020;font-size:clamp(2em,6vw,4em)">GAME OVER${loopText}</h1>
-    <div class="divider"></div>
-    ${statsHTML}
-    <p style="color:#8a6a4a;margin-top:15px;">Score: ${Math.floor(GameState.pScore)} · Tués: ${GameState.pKills} · Niveau: ${GameState.pLevel}</p>
-    <button id="startBtn" onclick="location.reload()">↺ RECOMMENCER</button>
-  `;
-}
-
-function gameWin() {
-  GameState.gameRunning = false;
-  document.exitPointerLock();
-  document.getElementById('hud').style.display = 'none';
-  document.getElementById('overlay').style.display = 'flex';
-  
-  // Update cumulative stats
-  GameState.totalPlayTime += GameState.pT;
-  GameState.totalKills += GameState.pKills;
-  
-  const loopText = GameState.loopLevel > 0 ? ` (Loop ${GameState.loopLevel})` : '';
-  const nextLoopDiff = Math.floor((GameState.loopLevel + 1) * 50);
-  
-  document.getElementById('overlay').innerHTML = `
-    <h1 style="color:#f0c030;font-size:clamp(2em,6vw,4em)">VICTOIRE !${loopText}</h1>
-    <div class="divider"></div>
-    <p style="color:#e0e0e0;font-size:18px;margin-bottom:20px;">Le boss final a été vaincu !</p>
-    <div style="max-width:500px;margin:auto;padding:15px;background:rgba(0,0,0,0.3);border-radius:8px;margin-bottom:25px;">
-      <div style="color:#aaa;font-size:14px;line-height:2;">
-        ⏱ Temps: ${Math.floor(GameState.pT / 60)}m ${Math.floor(GameState.pT % 60)}s<br>
-        💀 Tués: ${GameState.pKills}<br>
-        📈 Niveau: ${GameState.pLevel}<br>
-        ⭐ Score: ${Math.floor(GameState.pScore)}
-      </div>
-    </div>
-    <p style="color:#ffaa00;font-size:16px;margin-bottom:20px;">Que voulez-vous faire ?</p>
-    <div style="display:flex;gap:15px;justify-content:center;flex-wrap:wrap;">
-      <button onclick="continueToNextLoop()" style="background:#00aa44;flex:1;min-width:200px;max-width:250px;">
-        🔄 CONTINUER<br>
-        <span style="font-size:12px;opacity:0.8;">Loop ${GameState.loopLevel + 1} (+${nextLoopDiff}% difficulté)</span>
-      </button>
-      <button onclick="gameOver(true)" style="background:#aa2020;flex:1;min-width:200px;max-width:250px;">
-        🛑 ARRÊTER<br>
-        <span style="font-size:12px;opacity:0.8;">Voir les statistiques</span>
-      </button>
-    </div>
-  `;
-  
-  if (!GameState.saveData.wins) GameState.saveData.wins = {};
-  if (!GameState.saveData.wins[GameState.pClass.id]) GameState.saveData.wins[GameState.pClass.id] = [];
-  if (!GameState.saveData.wins[GameState.pClass.id].includes(GameState.pBiome.id)) GameState.saveData.wins[GameState.pClass.id].push(GameState.pBiome.id);
-  
-  // Unlock Next Biome
-  const currentBiomeIdx = BIOMES.findIndex(b => b.id === GameState.pBiome.id);
-  if (currentBiomeIdx !== -1 && currentBiomeIdx < BIOMES.length - 1) {
-    const nextBiome = BIOMES[currentBiomeIdx + 1];
-    if (!GameState.saveData.unlockedBiomes.includes(nextBiome.id)) {
-      GameState.saveData.unlockedBiomes.push(nextBiome.id);
-      addNotif(`🔓 Monde débloqué: ${nextBiome.name}`, '#00ff00');
-    }
-  }
-
-  // Unlock Classes
-  CLASSES.forEach(c => {
-    if (c.unlockReq && !GameState.saveData.unlockedClasses.includes(c.id)) {
-      if (c.unlockReq.includes(GameState.pClass.name)) {
-         GameState.saveData.unlockedClasses.push(c.id);
-         addNotif(`🔓 Classe débloquée: ${c.name}`, '#00ff00');
-      }
-    }
-  });
-
-  saveGame();
-}
+// ==================== MODULE OWNERSHIP ====================
+// Legacy monolith blocks removed: spawning, environment, and progression logic
+// are now owned by `game-spawning.js`, `game-environment.js`, and
+// `game-progression.js`.
 
 // ==================== CONTINUE TO NEXT LOOP (NG+) ====================
 window.continueToNextLoop = function() {
   // Increment loop level
   GameState.loopLevel++;
   GameState.totalLoops++;
+
+  // Advance to the next biome/stage.
+  const curIdx = Math.max(0, BIOMES.findIndex((b) => b.id === (GameState.pBiome && GameState.pBiome.id)));
+  const nextIdx = (curIdx + 1) % BIOMES.length;
+  GameState.selMapIdx = nextIdx;
+  GameState.pBiome = BIOMES[nextIdx];
+  if (typeof setTerrainBiome === 'function') setTerrainBiome(GameState.pBiome.id);
+  GameState.biomeFx = getBiomeProfile(GameState.pBiome);
+  if (typeof setTerrainBiomeProfile === 'function') setTerrainBiomeProfile(GameState.biomeFx);
+  GRAV = GameState.biomeFx ? GameState.biomeFx.gravity : -22;
+  refreshBiomeVisuals();
   
   // Save upgrades and key stats to restore after reset
   const savedUpgrades = JSON.parse(JSON.stringify(GameState.playerUpgrades));
@@ -990,8 +132,9 @@ window.continueToNextLoop = function() {
   projectiles.forEach(p => scene.remove(p.m));
   particles.forEach(p => scene.remove(p.m));
   dmgNums.forEach(d => scene.remove(d.sp));
-  chests.forEach(c => scene.remove(c.m));
+  chests.forEach(c => scene.remove(c.m || c.root));
   xpOrbs.forEach(o => scene.remove(o.m));
+  cardDrops.forEach(cd => scene.remove(cd.root));
   
   // Reset lists
   monsters = [];
@@ -1000,16 +143,28 @@ window.continueToNextLoop = function() {
   dmgNums = [];
   chests = [];
   xpOrbs = [];
+  cardDrops = [];
   
   // Reset boss state
   GameState.finalBossSpawned = false;
   GameState.bossAlive = false;
   GameState.nextBossKills = 15;
+  if (typeof resetSpawnTimers === 'function') resetSpawnTimers();
   
   // Reset game time for this loop
   GameState.pT = 0;
   GameState.pScore = 0;
   GameState.pKills = 0;
+  GameState.runTelemetry = {
+    damageTaken: 0,
+    damageDealt: 0,
+    elitesKilled: 0,
+    bossesKilled: 0,
+    avgFps: 60,
+    peakMonsters: 0
+  };
+  GameState._perfWindow = { acc: 0, frames: 0, fps: 60 };
+  GameState.perfSpawnScale = 1.0;
   
   // Restore player stats with bonuses
   GameState.pMaxHP = savedMaxHP;
@@ -1046,20 +201,9 @@ window.continueToNextLoop = function() {
   colliders = [];
   lastCX = null; lastCZ = null;
   
-  // Reset player position
-  let sx = 0, sz = 0;
-  if (['sky', 'heavens', 'void', 'chaos', 'warp', 'shadow', 'candy'].includes(GameState.pBiome.id)) {
-    let angle = 0, radius = 0;
-    for(let i=0; i<100; i++) {
-      const h = terrainH(sx, sz);
-      if(h > -50) break;
-      angle += 0.5;
-      radius += 5;
-      sx = Math.cos(angle) * radius;
-      sz = Math.sin(angle) * radius;
-    }
-  }
-  playerPivot.position.set(sx, terrainH(sx, sz) + 1.7, sz);
+  // Reset player position on guaranteed valid ground.
+  const safeLoopSpawn = findSafeSpawnPoint();
+  playerPivot.position.set(safeLoopSpawn.x, safeLoopSpawn.h + 1.7, safeLoopSpawn.z);
   playerPivot.rotation.set(0, 0, 0);
   camYaw = 0; camPitch = 0;
   
@@ -1067,6 +211,7 @@ window.continueToNextLoop = function() {
   GameState.gameRunning = true;
   GameState.paused = false;
   GameState.levelingUp = false;
+  GameState.pendingBossChestUpgrades = 0;
   GameState.invTimer = 0;
   GameState.dashCd = 0;
   GameState.dashTime = 0;
@@ -1076,7 +221,7 @@ window.continueToNextLoop = function() {
   GameState.pSpecialCd = 0;
   
   // Update spawn timers (slightly faster for difficulty)
-  spawnTimer = Math.max(0.8, 6 / (GameState.biomeFx ? GameState.biomeFx.spawnRateMult : 1) * (1 - GameState.loopLevel * 0.05));
+  spawnTimer = Math.max(0.25, 0.9 / (GameState.biomeFx ? GameState.biomeFx.spawnRateMult : 1) * (1 - GameState.loopLevel * 0.04));
   chestTimer = Math.max(6, 15 / (GameState.biomeFx ? GameState.biomeFx.chestRateMult : 1));
   biomeHazardTimer = 3.0;
   GameState.biomeSlowTimer = 0;
@@ -1092,27 +237,12 @@ window.continueToNextLoop = function() {
   
   // Notification
   const diffBonus = Math.floor(GameState.loopLevel * 50);
-  addNotif(`🔄 LOOP ${GameState.loopLevel} | +${diffBonus}% DIFFICULTÉ`, '#ffaa00');
+  addNotif(`🔄 LOOP ${GameState.loopLevel} | ${GameState.pBiome.name} | +${diffBonus}% DIFFICULTÉ`, '#ffaa00');
   
   saveGame();
 }
 
-function saveGame() {
-  // Keep legacy `gold` and current `money` fields in sync.
-  const money = typeof GameState.saveData.money === 'number' ? GameState.saveData.money : 0;
-  const gold = typeof GameState.saveData.gold === 'number' ? GameState.saveData.gold : 0;
-  const unified = Math.max(money, gold);
-  GameState.saveData.money = unified;
-  GameState.saveData.gold = unified;
-  try { localStorage.setItem('dw_save', JSON.stringify(GameState.saveData)); } catch(e) { console.error("Save failed", e); }
-}
-
-function loadGame() {
-  try {
-    const data = JSON.parse(localStorage.getItem('dw_save'));
-    if (data) GameState.saveData = { ...GameState.saveData, ...data };
-  } catch(e) {}
-}
+// Stable class/save helpers are provided by `game-progression.js`.
 
 // ==================== START GAME ====================
 window.startGame = function() {
@@ -1121,7 +251,18 @@ window.startGame = function() {
   if (!renderer) init(); // Safety check
   initStructureMaterials(); // Pre-cache materials before creating structures
   initProjPool(); // Pre-allocate projectile mesh pool
-  GameState.pClass = CLASSES[GameState.selCharIdx];
+  buildStableClassMaps();
+  migrateClassSaveData();
+
+  const selectedStableClass = getClassByStableId(GameState.saveData.selectedClassStableId);
+  if (selectedStableClass) {
+    const selectedIdx = CLASSES.findIndex((c) => c.id === selectedStableClass.id);
+    if (selectedIdx >= 0) GameState.selCharIdx = selectedIdx;
+  }
+  GameState.pClass = CLASSES[GameState.selCharIdx] || CLASSES[0];
+  if (GameState.pClass && classStableIdMap[GameState.pClass.id]) {
+    GameState.saveData.selectedClassStableId = classStableIdMap[GameState.pClass.id];
+  }
   
   GameState.thirdPerson = false; // Default to 1st person
 
@@ -1163,6 +304,13 @@ window.startGame = function() {
           }
       });
   }
+
+  if (!Array.isArray(GameState.saveData.unlockedCostumes)) GameState.saveData.unlockedCostumes = ['A'];
+  if (!GameState.saveData.unlockedCostumes.includes('A')) GameState.saveData.unlockedCostumes.push('A');
+  if (!GameState.saveData.selectedCostume) GameState.saveData.selectedCostume = 'A';
+  if (GameState.saveData.selectedCostume === 'B' && !GameState.saveData.unlockedCostumes.includes('B')) {
+    GameState.saveData.selectedCostume = 'A';
+  }
   
     // Gravity & biome profile
     GRAV = GameState.biomeFx ? GameState.biomeFx.gravity : -22;
@@ -1171,8 +319,11 @@ window.startGame = function() {
 
   GameState.galleryMode = false;
   GameState.levelingUp = false;
+  GameState.pendingBossChestUpgrades = 0;
   GameState.gameRunning = true;
   GameState.paused = false;
+  GameState.mainWeaponsEnabled = true;
+  GameState.autoAttackEnabled = true;
   GameState.playerUpgrades = {};
   GameState.weaponPaths = {};
   
@@ -1190,8 +341,9 @@ window.startGame = function() {
   projectiles.forEach(p => scene.remove(p.m));
   particles.forEach(p => scene.remove(p.m));
   dmgNums.forEach(d => scene.remove(d.sp));
-  chests.forEach(c => scene.remove(c.m));
+  chests.forEach(c => scene.remove(c.m || c.root));
   xpOrbs.forEach(o => scene.remove(o.m));
+  cardDrops.forEach(cd => scene.remove(cd.root));
 
   // Reset lists
   monsters = [];
@@ -1200,8 +352,9 @@ window.startGame = function() {
   dmgNums = [];
   chests = [];
   xpOrbs = [];
+  cardDrops = [];
   // Note: colliders et chunks sont gérés par updateTerrain
-  spawnTimer = Math.max(1.5, 6 / (GameState.biomeFx ? GameState.biomeFx.spawnRateMult : 1));
+  spawnTimer = Math.max(0.35, 1.2 / (GameState.biomeFx ? GameState.biomeFx.spawnRateMult : 1));
   chestTimer = Math.max(6, 15 / (GameState.biomeFx ? GameState.biomeFx.chestRateMult : 1));
   biomeHazardTimer = 3.0;
   GameState.biomeSlowTimer = 0;
@@ -1214,34 +367,46 @@ window.startGame = function() {
   GameState.pTank = false;
   GameState.pAssassin = false;
   GameState.nextBossKills = 15;
+  if (typeof resetSpawnTimers === 'function') resetSpawnTimers();
   GameState.pVelY = 0; // Reset vertical velocity
   SPD = GameState.pClass.spd * GameState.pSpdMult * (GameState.biomeFx ? GameState.biomeFx.playerSpeedMult : 1);
+  GameState._baseRunStats = {
+    pMaxHP: GameState.pMaxHP,
+    pPickupRange: GameState.pPickupRange,
+    pLuck: GameState.pLuck,
+    pXpMult: GameState.pXpMult,
+    pDmgRed: GameState.pDmgRed,
+    SPD: SPD
+  };
   GameState.pT = 0;
   GameState.pScore = 0;
   GameState.pKills = 0;
+  GameState.runTelemetry = {
+    damageTaken: 0,
+    damageDealt: 0,
+    elitesKilled: 0,
+    bossesKilled: 0,
+    avgFps: 60,
+    peakMonsters: 0
+  };
+  GameState._perfWindow = { acc: 0, frames: 0, fps: 60 };
+  GameState.perfSpawnScale = 1.0;
   GameState.pXP = 0;
   GameState.pLevel = 1;
   GameState.pSpecialCd = 0; // Cooldown capacité spéciale
   GameState.pVelX = 0; // Vitesse X (Physique)
   GameState.pVelZ = 0; // Vitesse Z (Physique)
 
-  // Reset Player Position (Spawn)
-  let sx = 0, sz = 0;
-  // Si c'est un biome type "îles flottantes", on cherche un sol
-  if (['sky', 'heavens', 'void', 'chaos', 'warp', 'shadow', 'candy'].includes(GameState.pBiome.id)) {
-      let angle = 0, radius = 0;
-      for(let i=0; i<100; i++) {
-          const h = terrainH(sx, sz);
-          if(h > -50) break; // Sol trouvé !
-          angle += 0.5;
-          radius += 5;
-          sx = Math.cos(angle) * radius;
-          sz = Math.sin(angle) * radius;
-      }
-  }
-  playerPivot.position.set(sx, terrainH(sx, sz) + 1.7, sz);
+    // Reset Player Position (Spawn) on guaranteed valid floor for every biome.
+    const safeStartSpawn = findSafeSpawnPoint();
+    playerPivot.position.set(safeStartSpawn.x, safeStartSpawn.h + 1.7, safeStartSpawn.z);
   playerPivot.rotation.set(0, 0, 0);
   camYaw = 0; camPitch = 0; // Reset camera angles
+
+    // Force terrain chunks around the spawn immediately to avoid empty-sky starts.
+    updateTerrain(playerPivot.position.x, playerPivot.position.z);
+    lastCX = Math.round(playerPivot.position.x / CHUNK_SZ);
+    lastCZ = Math.round(playerPivot.position.z / CHUNK_SZ);
 
   // Nettoyage des visuels des passifs de la partie précédente
   if (PASSIVES.orb.meshes) PASSIVES.orb.meshes.forEach(m => scene.remove(m));
@@ -1330,30 +495,23 @@ window.startGame = function() {
     case 'boss_lich': PASSIVES.skulls.active = true; PASSIVES.skulls.count = 2; break;
   }
 
-  // Activate weapon
-  const wepMap = {
-    'scepter': 'SCEPTER', 'sword': 'SWORD', 'axe': 'AXE', 'bow': 'BOW',
-    'daggers': 'DAGGERS', 'spear': 'SPEAR', 'hammer': 'HAMMER', 'boomerang': 'BOOMERANG',
-    'scythe': 'SCYTHE', 'katana': 'KATANA', 'flail': 'FLAIL', 'gauntlets': 'GAUNTLETS',
-    'grimoire': 'GRIMOIRE', 'whip': 'WHIP', 'cards': 'CARDS', 'pistol': 'PISTOL',
-    'trident': 'TRIDENT', 'rifle': 'RIFLE', 'shuriken': 'SHURIKEN', 'void_staff': 'VOID_STAFF',
-    'fire_staff': 'FIRE_STAFF', 'leaf_blade': 'LEAF_BLADE', 'potion': 'POTION', 'lute': 'LUTE', 'wrench': 'WRENCH',
-    'javelin': 'JAVELIN', 'crossbow': 'CROSSBOW', 'runestone': 'RUNESTONE', 'rapier': 'RAPIER', 'bomb': 'BOMB',
-    'totem': 'TOTEM', 'claws': 'CLAWS', 'mace': 'MACE', 'mirror': 'MIRROR', 'revolver': 'REVOLVER',
-    'needles': 'NEEDLES', 'lightning_rod': 'LIGHTNING_ROD', 'ice_bow': 'ICE_BOW', 'dagger_sac': 'DAGGER_SAC',
-    'drill': 'DRILL', 'star_globe': 'STAR_GLOBE', 'cleaver': 'CLEAVER', 'balls': 'BALLS', 'greatsword': 'GREATSWORD',
-    'rock': 'ROCK', 'blowgun': 'BLOWGUN', 'greatbow': 'GREATBOW', 'dark_blade': 'DARK_BLADE', 'sun_staff': 'SUN_STAFF',
-    'hourglass': 'HOURGLASS'
-  };
-  // Désactiver toutes les armes avant d'activer celle de la classe
-  for (const k in WEAPONS) WEAPONS[k].active = false;
-
-  const wepKey = wepMap[GameState.pClass.wep];
-  if (wepKey) WEAPONS[wepKey].active = true;
-  else {
-    // Fallback si l'arme n'est pas trouvée
-    console.warn("Weapon not found in map:", GameState.pClass.wep);
+  // Initialize VS-like loadout schema while keeping current runtime combat behavior.
+  if (typeof initializeRunInventoryFromClass === 'function') {
+    initializeRunInventoryFromClass(GameState.pClass.wep);
+  }
+  if (typeof syncLegacyWeaponActivationFromInventory === 'function') {
+    syncLegacyWeaponActivationFromInventory();
+  } else {
+    // Legacy fallback if loadout module is unavailable.
+    for (const k in WEAPONS) WEAPONS[k].active = false;
     WEAPONS.SCEPTER.active = true;
+  }
+
+  GameState.runUsedWeapons = {};
+  if (GameState.inventory && Array.isArray(GameState.inventory.mainWeapons)) {
+    GameState.inventory.mainWeapons.forEach((slot) => {
+      if (slot && slot.id) GameState.runUsedWeapons[String(slot.id).toUpperCase()] = true;
+    });
   }
 
   // Generate ground texture
@@ -1399,16 +557,34 @@ window.startGame = function() {
 
   // Create Player Model (for 3rd person)
   if (playerModel) playerPivot.remove(playerModel);
-  const pm = buildPlayerModel(GameState.pClass);
+  let pm = null;
+  try {
+    pm = (typeof buildPlayerModel === 'function') ? buildPlayerModel(GameState.pClass) : null;
+  } catch (err) {
+    console.error('buildPlayerModel failed:', err);
+  }
+  if (!pm || !pm.root) {
+    const fallback = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 1.6, 0.5),
+      new THREE.MeshLambertMaterial({ color: 0x88aacc })
+    );
+    body.position.y = 0.8;
+    fallback.add(body);
+    pm = { root: fallback, parts: {}, typeData: { S: 1.0, shape: 'human' } };
+    addNotif('Modele joueur fallback active (erreur de rendu).', '#ffb070');
+  }
   playerModel = pm.root;
-  playerParts = pm.parts;
-  playerTypeData = pm.typeData;
+  playerParts = pm.parts || {};
+  playerTypeData = pm.typeData || { S: 1.0, shape: 'human' };
   playerPivot.add(playerModel);
   playerModel.position.y = -1.6; // Ancrer le modèle au sol
   playerModel.visible = false; // Start hidden (1st person)
 
+  GameState.hideWeaponModels = true;
   if (typeof createVM === 'function') {
     createVM(GameState.pClass.wep);
+    if (vm) vm.visible = false;
   }
 
   scene.fog.color.setHex(GameState.pBiome.fog);
@@ -1418,7 +594,7 @@ window.startGame = function() {
   document.getElementById('hud').style.display = 'block';
   clock.start();
   renderer.domElement.requestPointerLock();
-  for (let i = 0; i < 8; i++) { const a = Math.random() * Math.PI * 2, d = 18 + Math.random() * 12; monsters.push(new Monster(Math.cos(a) * d, Math.sin(a) * d)); }
+  for (let i = 0; i < 16; i++) { const a = Math.random() * Math.PI * 2, d = 16 + Math.random() * 12; monsters.push(new Monster(Math.cos(a) * d, Math.sin(a) * d)); }
   addNotif(`⚔ ${GameState.pClass.wep.toUpperCase()} équipé`, '#f0c030');
   
   // Force terrain update
@@ -1429,24 +605,196 @@ window.startGame = function() {
   addNotif("Bonne chance !", "#ffffff");
   newQuest();
  } catch(e) {
-     console.error(e);
-     addNotif("ERREUR: " + e.message, "#ff0000");
+   console.error(e);
+   GameState.gameRunning = false;
+   GameState.paused = false;
+   document.getElementById('overlay').style.display = 'flex';
+   document.getElementById('hud').style.display = 'none';
+   addNotif("ERREUR: " + e.message, "#ff0000");
  }
 }
 
-// ==================== DASH FUNCTION ====================
+// ==================== MOVEMENT SKILL ====================
+function _movementHash(id) {
+  const src = String(id || 'unknown');
+  let h = 0;
+  for (let i = 0; i < src.length; i++) h = (h * 31 + src.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function getMovementSkillForClass(cls) {
+  const id = (cls && cls.id) ? cls.id : 'mage';
+  const hash = _movementHash(id);
+
+  const direct = {
+    mage: { id: 'blink', name: 'Blink Arcane', cd: 4.0, iFrames: 0.18, use: function () {
+      const d = fwd().setY(0).normalize();
+      const dist = 8;
+      const t = playerPivot.position.clone().addScaledVector(d, dist);
+      t.y = terrainH(t.x, t.z) + 1.7;
+      playerPivot.position.copy(t);
+      spawnPart(t, 0x77ccff, 20, 6);
+    } },
+    knight: { id: 'guard_step', name: 'Pas Garde', cd: 3.8, iFrames: 0.28, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 4.5);
+      GameState.pDmgRed += 0.2;
+      setTimeout(() => { GameState.pDmgRed = Math.max(0, GameState.pDmgRed - 0.2); }, 900);
+      spawnPart(playerPivot.position, 0xffffff, 16, 5);
+    } },
+    rogue: { id: 'smoke_dash', name: 'Dash Fumigene', cd: 2.8, iFrames: 0.35, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 6.0);
+      spawnPart(playerPivot.position, 0x777777, 24, 7);
+      GameState.pDodge += 0.2;
+      setTimeout(() => { GameState.pDodge = Math.max(0, GameState.pDodge - 0.2); }, 1100);
+    } },
+    ranger: { id: 'grapple', name: 'Grapin', cd: 3.2, iFrames: 0.16, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 9.0);
+      GameState.pVelY = Math.max(GameState.pVelY, 2.0);
+      spawnPart(playerPivot.position, 0x88ffaa, 18, 6);
+    } },
+    chronomancer: { id: 'time_skip', name: 'Saut Temporel', cd: 5.2, iFrames: 0.25, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 7.5);
+      GameState.frenzyTimer = Math.max(GameState.frenzyTimer, 1.6);
+      spawnPart(playerPivot.position, 0xaad8ff, 20, 6);
+    } }
+  };
+  if (direct[id]) return direct[id];
+
+  const kind = hash % 4;
+  const cd = 3.0 + (hash % 9) * 0.25;
+  const iFrames = 0.15 + (hash % 4) * 0.06;
+  if (kind === 0) {
+    return { id: 'dash', name: 'Ruée', cd: cd, iFrames: iFrames, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 5.5 + (hash % 3));
+      spawnPart(playerPivot.position, 0xaaddff, 14, 6);
+    } };
+  }
+  if (kind === 1) {
+    return { id: 'hop', name: 'Bond', cd: cd, iFrames: iFrames, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 3.5 + (hash % 2));
+      GameState.pVelY = Math.max(GameState.pVelY, 6.5);
+      spawnPart(playerPivot.position, 0xffdd88, 14, 6);
+    } };
+  }
+  if (kind === 2) {
+    return { id: 'phase', name: 'Phase', cd: cd, iFrames: iFrames + 0.12, use: function () {
+      const d = fwd().setY(0).normalize();
+      playerPivot.position.addScaledVector(d, 4.6 + (hash % 4) * 0.6);
+      spawnPart(playerPivot.position, 0xaa88ff, 18, 6);
+    } };
+  }
+  return { id: 'side_step', name: 'Pas Latéral', cd: cd, iFrames: iFrames, use: function () {
+    const side = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
+    const sign = (hash % 2) ? 1 : -1;
+    playerPivot.position.addScaledVector(side, sign * 5.0);
+    spawnPart(playerPivot.position, 0x88ffcc, 15, 6);
+  } };
+}
+
+window.getMovementSkillPreviewForClass = function (classData) {
+  const sk = getMovementSkillForClass(classData);
+  return { name: sk.name, cd: sk.cd };
+};
+
 function attemptDash() {
-    if (GameState.dashCd <= 0 && GameState.gameRunning && !GameState.levelingUp) {
-      GameState.dashCd = 1.5 * GameState.pDashCdMult;
-      GameState.dashTime = 0.15;
-      // Dash direction is current movement or forward if standing still
-      const moveDir = new THREE.Vector3(GameState.pVelX, 0, GameState.pVelZ).normalize();
-      if (moveDir.lengthSq() === 0) moveDir.copy(fwd()).setY(0).normalize();
-      
-      GameState.dashDir.copy(moveDir);
-      spawnPart(playerPivot.position, 0xaaddff, 12, 6);
-      GameState.invTimer = 0.3; // Invincibility frames during dash
+  if (!GameState.gameRunning || GameState.levelingUp) return;
+  const skill = getMovementSkillForClass(GameState.pClass);
+  GameState.pMoveSkillCdBase = Math.max(0.6, Number(skill.cd || 3.0));
+  const maxCd = GameState.pMoveSkillCdBase * GameState.pDashCdMult;
+  if (GameState.dashCd > 0) return;
+
+  GameState.dashCd = maxCd;
+  GameState.dashTime = 0;
+  GameState.invTimer = Math.max(GameState.invTimer, skill.iFrames || 0.2);
+  try {
+    skill.use();
+    addNotif('🌀 Mouvement: ' + skill.name, '#aaddff');
+  } catch (e) {
+    console.warn('Movement skill failed:', e);
+  }
+}
+
+function applyMonsterSeparation(dt) {
+  if (!Array.isArray(monsters) || monsters.length < 2) return;
+  const resolveStrength = Math.max(0.2, Math.min(1.2, dt * 18));
+  const moved = [];
+
+  function markMoved(mon) {
+    if (!mon || !mon.root) return;
+    if (moved.indexOf(mon) < 0) moved.push(mon);
+  }
+
+  for (let i = 0; i < monsters.length - 1; i++) {
+    const a = monsters[i];
+    if (!a || a.dead || !a.root) continue;
+    const ar = Math.max(0.35, Number(a.collisionRadius) || (a.T && a.T.S ? a.T.S * 0.55 : 0.55));
+    for (let j = i + 1; j < monsters.length; j++) {
+      const b = monsters[j];
+      if (!b || b.dead || !b.root) continue;
+      const br = Math.max(0.35, Number(b.collisionRadius) || (b.T && b.T.S ? b.T.S * 0.55 : 0.55));
+      const aBoss = !!(a.boss || a.finalBoss);
+      const bBoss = !!(b.boss || b.finalBoss);
+
+      // Never move bosses via crowd separation; they stay combat anchors.
+      if (aBoss && bBoss) continue;
+
+      const dx = b.root.position.x - a.root.position.x;
+      const dz = b.root.position.z - a.root.position.z;
+      const distSq = dx * dx + dz * dz;
+      const minDist = ar + br;
+      if (distSq <= 0.00001) {
+        const nudge = 0.03 * resolveStrength;
+        if (aBoss) {
+          b.root.position.x += nudge * 2;
+          markMoved(b);
+        } else if (bBoss) {
+          a.root.position.x -= nudge * 2;
+          markMoved(a);
+        } else {
+          a.root.position.x -= nudge;
+          b.root.position.x += nudge;
+          markMoved(a);
+          markMoved(b);
+        }
+        continue;
+      }
+      if (distSq >= minDist * minDist) continue;
+      const dist = Math.sqrt(distSq);
+      const overlap = (minDist - dist) * resolveStrength;
+      if (overlap <= 0) continue;
+      const nx = dx / dist;
+      const nz = dz / dist;
+      const push = overlap * 0.5;
+      if (aBoss) {
+        b.root.position.x += nx * overlap;
+        b.root.position.z += nz * overlap;
+        markMoved(b);
+      } else if (bBoss) {
+        a.root.position.x -= nx * overlap;
+        a.root.position.z -= nz * overlap;
+        markMoved(a);
+      } else {
+        a.root.position.x -= nx * push;
+        a.root.position.z -= nz * push;
+        b.root.position.x += nx * push;
+        b.root.position.z += nz * push;
+        markMoved(a);
+        markMoved(b);
+      }
     }
+  }
+
+  // Separation happens after monster update; refresh transforms for hit detection this frame.
+  for (let i = 0; i < moved.length; i++) {
+    const mon = moved[i];
+    if (mon && mon.root) mon.root.updateMatrixWorld(true);
+  }
 }
 
 // ==================== MAIN LOOP ====================
@@ -1522,6 +870,8 @@ function loop() {
 
     GameState.globalTime += dt;
     GameState.pT += dt;
+    if (typeof applyRunPassiveStatsToRuntime === 'function') applyRunPassiveStatsToRuntime();
+    if (typeof applyInventoryWeaponScalingToRuntime === 'function') applyInventoryWeaponScalingToRuntime();
     GameState.pScore += dt * 10;
     GameState.invTimer = Math.max(0, GameState.invTimer - dt);
     GameState.frenzyTimer = Math.max(0, GameState.frenzyTimer - dt);
@@ -1548,9 +898,11 @@ function loop() {
     } else {
         keyState.q = false;
     }
+
+    // R key is handled by bootstrap for auto-attack toggle.
+    keyState.r = false;
     
-    // Dash (Right Click) - Note: KeyE is handled in keydown event
-    if (mDown[2]) attemptDash();
+    // KeyE: class-specific movement skill.
 
     // Movement - Define isMoving BEFORE camera update
     _vMove.set(0, 0, 0);
@@ -1628,9 +980,14 @@ function loop() {
         addNotif("CHUTE DANS LE VIDE!", "#ff0000");
         if (GameState.pHP <= 0) gameOver();
         else {
-            playerPivot.position.y = 30; // Respawn high
-            GameState.pVelY = 0;
-            playerPivot.position.lerp(new THREE.Vector3(0, 30, 0), 0.1); // Move towards center
+          const safeRespawn = findSafeSpawnPoint();
+          playerPivot.position.set(safeRespawn.x, safeRespawn.h + 2.5, safeRespawn.z);
+          GameState.pVelY = 0;
+          GameState.pVelX = 0;
+          GameState.pVelZ = 0;
+          updateTerrain(playerPivot.position.x, playerPivot.position.z);
+          lastCX = Math.round(playerPivot.position.x / CHUNK_SZ);
+          lastCZ = Math.round(playerPivot.position.z / CHUNK_SZ);
         }
     } else if (gh > -50 && playerPivot.position.y < gh) { 
         // Solid ground collision
@@ -1649,36 +1006,77 @@ function loop() {
       }
     } else keyState.space = false;
 
-    // Viewmodel
+    // Viewmodel disabled for readability (no FP/TP weapon models)
     vmRecoil = Math.max(0, vmRecoil - dt * (WEAPONS.SCEPTER.active || WEAPONS.BOW.active || WEAPONS.BOOMERANG.active ? 7 : 4));
     const sway = Math.sin(GameState.pT * 2.6) * 0.003 * (isMoving ? 0.8 : 1);
     const bob = Math.sin(GameState.pT * 10) * 0.01 * (isMoving ? 1 : 0);
-  if (vmModel) {
-    vmModel.position.x = 0.4 + sway + bob;
+  if (!GameState.hideWeaponModels && vmModel) {
+    vmModel.position.x = 0.38 + sway + bob;
     vmModel.position.y = -0.3 + sway - vmRecoil * 0.1 + Math.abs(bob);
     vmModel.rotation.x = -Math.PI/2 - vmRecoil * 0.2;
-    }
+  }
+  vmModelLeft = window.vmModelLeft || vmModelLeft;
+  if (!GameState.hideWeaponModels && vmModelLeft) {
+    vmModelLeft.position.x = -0.38 - sway - bob;
+    vmModelLeft.position.y = -0.3 + sway - vmRecoil * 0.1 + Math.abs(bob);
+    vmModelLeft.rotation.x = -Math.PI/2 - vmRecoil * 0.2;
+    vmModelLeft.rotation.y = Math.PI;
+  }
 
     // Terrain
     const px = playerPivot.position.x, pz = playerPivot.position.z;
     const cx = Math.round(px / CHUNK_SZ), cz = Math.round(pz / CHUNK_SZ);
     if (cx !== lastCX || cz !== lastCZ) { updateTerrain(px, pz); lastCX = cx; lastCZ = cz; }
 
-    // Chests
+    // World pickups
     chestTimer -= dt;
-    if (chestTimer < 0) { const a = Math.random() * Math.PI * 2, d = 15 + Math.random() * 15; chests.push(new Chest(playerPivot.position.x + Math.cos(a) * d, playerPivot.position.z + Math.sin(a) * d)); chestTimer = 15 + Math.random() * 15; }
-    for (let i = chests.length - 1; i >= 0; i--) { if (chests[i].update(dt, playerPivot.position)) { scene.remove(chests[i].m); chests.splice(i, 1); } }
+    if (chestTimer < 0) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 15 + Math.random() * 15;
+      chests.push(new WorldPickup(playerPivot.position.x + Math.cos(a) * d, playerPivot.position.z + Math.sin(a) * d));
+      chestTimer = 11 + Math.random() * 14;
+    }
+    for (let i = chests.length - 1; i >= 0; i--) {
+      if (chests[i].update(dt, playerPivot.position)) {
+        scene.remove(chests[i].m || chests[i].root);
+        chests.splice(i, 1);
+      }
+    }
     for (let i = xpOrbs.length - 1; i >= 0; i--) { if (xpOrbs[i].update(dt, playerPivot.position)) xpOrbs.splice(i, 1); }
+    for (let i = cardDrops.length - 1; i >= 0; i--) {
+      if (cardDrops[i].update(dt, playerPivot.position)) cardDrops.splice(i, 1);
+    }
+
+    // Performance sampling to keep late-game swarms playable.
+    if (!GameState._perfWindow) GameState._perfWindow = { acc: 0, frames: 0, fps: 60 };
+    GameState._perfWindow.acc += dt;
+    GameState._perfWindow.frames++;
+    if (GameState._perfWindow.acc >= 0.5) {
+      const fps = GameState._perfWindow.frames / Math.max(0.001, GameState._perfWindow.acc);
+      GameState._perfWindow.fps = fps;
+      GameState._perfWindow.acc = 0;
+      GameState._perfWindow.frames = 0;
+      if (GameState.runTelemetry) GameState.runTelemetry.avgFps = Math.round(fps);
+      if (fps >= 58) GameState.perfSpawnScale = 1.0;
+      else if (fps >= 48) GameState.perfSpawnScale = 0.92;
+      else if (fps >= 38) GameState.perfSpawnScale = 0.82;
+      else GameState.perfSpawnScale = 0.72;
+    }
+    if (GameState.runTelemetry) {
+      GameState.runTelemetry.peakMonsters = Math.max(GameState.runTelemetry.peakMonsters || 0, monsters.length);
+    }
 
     // Spawn + boss
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
       const rate = GameState.biomeFx ? GameState.biomeFx.spawnRateMult : 1;
-      // Spawn TRÈS rapide pour effet swarm intense (style Vampire Survivors)
-      // 2.5 sec → 0.4 sec au bout de 3 minutes (encore plus rapide dans les loops)
-      const loopSpeedBonus = GameState.loopLevel * 0.1; // Chaque loop réduit le cooldown
-      const baseCd = Math.max(0.4, 2.5 - (GameState.pT / 60) - loopSpeedBonus);
-      spawnTimer = baseCd / rate;
+      const director = (typeof getRunDirectorSnapshot === 'function') ? getRunDirectorSnapshot() : null;
+      const phaseMul = director && director.spawnMul ? director.spawnMul : 1.0;
+      const perfScale = Math.max(0.6, Math.min(1.1, Number(GameState.perfSpawnScale || 1.0)));
+      // Spawn agressif: la pression monte rapidement avec le temps et les loops.
+      const loopSpeedBonus = GameState.loopLevel * 0.08;
+      const baseCd = Math.max(0.18, 1.4 - (GameState.pT / 90) - loopSpeedBonus);
+      spawnTimer = (baseCd / Math.max(0.01, rate * phaseMul)) / Math.max(0.75, perfScale);
       doSpawn();
     }
     checkBoss();
@@ -1686,7 +1084,9 @@ function loop() {
 
     // Update
     for (let i = monsters.length - 1; i >= 0; i--) { if (monsters[i].update(dt, playerPivot.position)) { scene.remove(monsters[i].root); monsters.splice(i, 1); } }
+    applyMonsterSeparation(dt);
     for (let i = projectiles.length - 1; i >= 0; i--) { if (projectiles[i].update(dt, playerPivot.position)) projectiles.splice(i, 1); }
+    if (typeof updateFamilyGroundZones === 'function') updateFamilyGroundZones(dt);
     updatePassives(dt);
     updPart(dt);
     updateDayNight(dt);
@@ -1746,7 +1146,7 @@ function loop() {
             }
         } else {
             playerModel.visible = false;
-            if (vm) vm.visible = true;
+            if (vm) vm.visible = false;
             
             camera.position.copy(playerPivot.position);
             camera.position.y += 1.5 * (playerTypeData.S || 1.0); // Hauteur de caméra ajustée selon la taille du personnage
@@ -1760,269 +1160,10 @@ function loop() {
   renderer.render(scene, camera);
 }
 
-// ==================== MINIMAP ====================
-function drawMinimap() {
-  if (!minimapCtx) return;
-  const ctx = minimapCtx, w = 120, h = 120, cx = w / 2, cy = h / 2, scale = 1.5;
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#0f0';
-  ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
-  const pp = playerPivot.position;
-  ctx.fillStyle = '#f00';
-  monsters.forEach(m => { if (m.dead) return; const dx = (m.root.position.x - pp.x) * scale, dz = (m.root.position.z - pp.z) * scale; if (dx * dx + dz * dz < (w / 2) * (w / 2)) { ctx.beginPath(); ctx.arc(cx + dx, cy + dz, 2, 0, Math.PI * 2); ctx.fill(); } });
-  ctx.fillStyle = '#fd0';
-  chests.forEach(c => { const dx = (c.m.position.x - pp.x) * scale, dz = (c.m.position.z - pp.z) * scale; if (dx * dx + dz * dz < (w / 2) * (w / 2)) { ctx.beginPath(); ctx.arc(cx + dx, cy + dz, 3, 0, Math.PI * 2); ctx.fill(); } });
-}
+// Runtime UI helpers moved to `game-runtime-ui.js`:
+// - drawMinimap()
+// - updateBossPointer()
 
-// ==================== BOSS POINTER ====================
-function updateBossPointer() {
-  const pointer = document.getElementById('bossPointer');
-  if (!pointer) return;
-  
-  // Trouver le boss actif
-  const boss = monsters.find(m => (m.boss || m.finalBoss) && !m.dead);
-  
-  if (!boss) {
-    pointer.style.display = 'none';
-    return;
-  }
-  
-  // Calculer la position du boss par rapport au joueur
-  const pp = playerPivot.position;
-  const bp = boss.root.position;
-  const dx = bp.x - pp.x;
-  const dz = bp.z - pp.z;
-  const dist = Math.sqrt(dx * dx + dz * dz);
-  
-  // Si le boss est trop proche, ne pas afficher l'indicateur
-  if (dist < 15) {
-    pointer.style.display = 'none';
-    return;
-  }
-  
-  pointer.style.display = 'block';
-  
-  // Calculer l'angle vers le boss (par rapport à la direction de vue)
-  const angleToBoss = Math.atan2(dx, dz);
-  const angleFromView = angleToBoss - camYaw;
-  
-  // Normaliser l'angle entre -PI et PI
-  let normalizedAngle = angleFromView;
-  while (normalizedAngle > Math.PI) normalizedAngle -= Math.PI * 2;
-  while (normalizedAngle < -Math.PI) normalizedAngle += Math.PI * 2;
-  
-  // Position sur le bord de l'écran
-  const screenW = window.innerWidth;
-  const screenH = window.innerHeight;
-  const edgeMargin = 60;
-  
-  // Convertir l'angle en position d'écran
-  const screenAngle = normalizedAngle + Math.PI / 2; // Rotate 90° pour que haut = 0
-  const radius = Math.min(screenW, screenH) * 0.4;
-  
-  let x = screenW / 2 + Math.cos(screenAngle) * radius;
-  let y = screenH / 2 - Math.sin(screenAngle) * radius;
-  
-  // Contraindre aux bords de l'écran
-  x = Math.max(edgeMargin, Math.min(screenW - edgeMargin, x));
-  y = Math.max(edgeMargin, Math.min(screenH - edgeMargin, y));
-  
-  pointer.style.left = x + 'px';
-  pointer.style.top = y + 'px';
-  
-  // Rotation de la flèche pour pointer vers le boss
-  const arrowRotation = (-normalizedAngle * 180 / Math.PI) - 90;
-  pointer.querySelector('.boss-arrow').style.transform = 'rotate(' + arrowRotation + 'deg)';
-  
-  // Afficher la distance
-  const distText = Math.floor(dist) + 'm';
-  pointer.querySelector('.boss-dist').textContent = distText;
-}
-
-// ==================== INIT ====================
-let isInitialized = false;
-function init() {
-  if (typeof GameState === 'undefined') {
-    console.error("GameState is not defined. Check data.js for errors.");
-    return;
-  }
-  loadGame(); // Load progress on init
-  checkBossUnlocks(); // Check for retroactive unlocks
-  
-  // --- FIX CRITIQUE : Réparation de la sauvegarde si corrompue ---
-  if (!GameState.saveData) GameState.saveData = {};
-  if (!Array.isArray(GameState.saveData.unlockedClasses)) GameState.saveData.unlockedClasses = [];
-  if (GameState.saveData.unlockedClasses.length === 0) GameState.saveData.unlockedClasses = ['mage', 'knight'];
-  if (!GameState.saveData.unlockedClasses.includes('mage')) GameState.saveData.unlockedClasses.push('mage');
-
-  if (!Array.isArray(GameState.saveData.unlockedBiomes)) GameState.saveData.unlockedBiomes = [];
-  if (GameState.saveData.unlockedBiomes.length === 0) GameState.saveData.unlockedBiomes = ['plains'];
-  if (!GameState.saveData.unlockedBiomes.includes('plains')) GameState.saveData.unlockedBiomes.push('plains');
-  if (typeof GameState.saveData.money !== 'number') GameState.saveData.money = 0;
-  if (typeof GameState.saveData.gold !== 'number') GameState.saveData.gold = GameState.saveData.money;
-  const unifiedCurrency = Math.max(GameState.saveData.money, GameState.saveData.gold);
-  GameState.saveData.money = unifiedCurrency;
-  GameState.saveData.gold = unifiedCurrency;
-  if (typeof GameState.saveData.permUpgrades === 'undefined') GameState.saveData.permUpgrades = {};
-  if (!Array.isArray(GameState.saveData.unlockedCosmetics)) GameState.saveData.unlockedCosmetics = ['default'];
-  if (!GameState.saveData.equippedCosmetic) GameState.saveData.equippedCosmetic = 'default';
-  if (!GameState.saveData.settings) GameState.saveData.settings = { view: 0, particles: 1 };
-  // ---------------------------------------------------------------
-
-  if (isInitialized) return;
-  isInitialized = true;
-  const cv = document.getElementById('main');
-  
-  // Initialize default biome and ground texture to prevent errors before game start
-  if (typeof BIOMES !== 'undefined' && BIOMES.length > 0) {
-    GameState.pBiome = BIOMES[0];
-    if (typeof setTerrainBiome === 'function') setTerrainBiome(GameState.pBiome.id);
-    GameState.biomeFx = getBiomeProfile(GameState.pBiome);
-    if (typeof setTerrainBiomeProfile === 'function') setTerrainBiomeProfile(GameState.biomeFx);
-  }
-  
-  renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setClearColor(0x8ab8d8);
-
-  scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x8ab8d8, 0.018);
-
-  camera = new THREE.PerspectiveCamera(85, innerWidth / innerHeight, 0.04, 250);
-  camera.rotation.order = 'YXZ';
-  scene.add(camera);
-  clock = new THREE.Clock();
-
-  scene.add(new THREE.AmbientLight(0x557799, 0.6));
-  sunLight = new THREE.DirectionalLight(0xffe8cc, 1.1);
-  sunLight.position.set(60, 120, 40);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
-  sunLight.shadow.camera.left = sunLight.shadow.camera.bottom = -100;
-  sunLight.shadow.camera.right = sunLight.shadow.camera.top = 100;
-  sunLight.shadow.camera.far = 200;
-  scene.add(sunLight);
-  fillLight = new THREE.DirectionalLight(0x445566, 0.3);
-  fillLight.position.set(-40, 20, -60);
-  scene.add(fillLight);
-
-  // Sky
-  skyMat = new THREE.ShaderMaterial({
-    uniforms: { tC: { value: new THREE.Color(0x1a3a6a) }, bC: { value: new THREE.Color(0x7ab0d8) } },
-    vertexShader: 'varying float vY;void main(){vY=position.y;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1);}',
-    fragmentShader: 'uniform vec3 tC,bC;varying float vY;void main(){gl_FragColor=vec4(mix(bC,tC,clamp((vY+100.)/300.,0.,1.)),1.);}',
-    side: THREE.BackSide, depthWrite: false
-  });
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(220, 16, 8), skyMat));
-
-  // Clouds
-  for (let i = 0; i < 24; i++) {
-    const g = new THREE.Group();
-    for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(8 + Math.random() * 12, 2.5 + Math.random() * 3, 5 + Math.random() * 7), new THREE.MeshBasicMaterial({ color: 0xe8edf5, transparent: true, opacity: 0.82 }));
-      m.position.set(j * 5, Math.random() * 3, Math.random() * 4);
-      g.add(m);
-    }
-    g.position.set((Math.random() - 0.5) * 350, 50 + Math.random() * 30, (Math.random() - 0.5) * 350);
-    scene.add(g);
-  }
-  
-  // Default ground texture
-  const s = 4, c = document.createElement('canvas'); c.width = s; c.height = s;
-  const ctx = c.getContext('2d'); ctx.fillStyle = '#5a6a4a'; ctx.fillRect(0, 0, s, s);
-  groundTex = new THREE.CanvasTexture(c);
-
-  // Player
-  playerPivot = new THREE.Group();
-  
-  // Recherche d'un point de spawn solide (évite de tomber dans le vide au départ)
-  let sx = 0, sz = 0;
-  // Si c'est un biome type "îles flottantes", on cherche un sol
-  if (['sky', 'heavens', 'void', 'chaos', 'warp', 'shadow', 'candy'].includes(GameState.pBiome.id)) {
-      let angle = 0, radius = 0;
-      for(let i=0; i<250; i++) {
-          const h = terrainH(sx, sz);
-          if(h > -50) break; // Sol trouvé !
-          angle += 0.8;
-          radius += 6;
-          sx = Math.cos(angle) * radius;
-          sz = Math.sin(angle) * radius;
-      }
-  }
-  
-  let startH = terrainH(sx, sz);
-  if (isNaN(startH)) startH = 0;
-  playerPivot.position.set(sx, startH + 1.7, sz);
-  
-  // Safety: Ensure no NaN at start
-  if (isNaN(playerPivot.position.x) || isNaN(playerPivot.position.y) || isNaN(playerPivot.position.z)) {
-      playerPivot.position.set(0, 30, 0);
-  }
-  scene.add(playerPivot);
-
-  minimapCtx = document.getElementById('minimap').getContext('2d');
-  injectDOM(); // Inject new UI elements
-  initSelectionUI(); // Update UI with loaded save data
-  window.galleryPivot = new THREE.Group();
-  window.galleryPivot.position.set(0, 500, 0);
-  scene.add(window.galleryPivot);
-
-  // Input
-  document.addEventListener('keydown', e => {
-    keys[e.code] = true;
-    if (e.code === 'KeyE') {
-        attemptDash();
-    }
-    if (e.code === 'KeyV') { // Toggle View
-        GameState.thirdPerson = !GameState.thirdPerson;
-        addNotif(GameState.thirdPerson ? "Vue: 3ème Personne" : "Vue: 1ère Personne", "#ffffff");
-    }
-    if (e.code === 'Escape') {
-      if (GameState.gameRunning && !GameState.levelingUp) {
-        if (GameState.paused) {
-          resumeGame();
-        } else {
-          GameState.paused = true;
-          document.exitPointerLock();
-          document.getElementById('hud').style.display = 'none';
-          document.getElementById('pauseMenu').style.display = 'flex';
-        }
-      } else if (GameState.galleryMode) {
-        closeGallery();
-      } else if (document.getElementById('progressionUI').style.display === 'flex') {
-        closeProgression();
-      }
-    }
-    if (e.code === 'Space') e.preventDefault();
-  });
-  document.addEventListener('keyup', e => { keys[e.code] = false; });
-  document.addEventListener('mousedown', e => {
-    if (!GameState.gameRunning || GameState.levelingUp) return;
-    if (e.target !== cv) return; // Ignore les clics sur l'interface (boutons, etc.)
-    if (document.pointerLockElement !== cv) { cv.requestPointerLock(); return; }
-    mDown[e.button] = true;
-  });
-  document.addEventListener('mouseup', e => { mDown[e.button] = false; });
-  document.addEventListener('mousemove', e => {
-    if (document.pointerLockElement !== cv) return;
-    camYaw -= e.movementX * 0.0028;
-    camPitch -= e.movementY * 0.0028; // Correction souris pour comportement standard
-    camPitch = Math.max(-1.4, Math.min(1.4, camPitch)); // Soft limit: ~±80° to prevent camera inversion
-  });
-  document.addEventListener('pointerlockchange', () => {
-    const lk = document.pointerLockElement === cv;
-    if (!GameState.levelingUp) document.getElementById('lkhint').style.display = lk ? 'none' : 'block';
-  });
-  window.addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
-
-  loop(); // Démarrage de la boucle de rendu
-}
-
-// Auto-start when DOM is ready - wrapped for reliability
-window.addEventListener('load', function() {
-  // Small delay to ensure everything is initialized
-  setTimeout(init, 100);
-});
+// Bootstrap moved to `game-bootstrap.js`:
+// - init()
+// - auto-start on window load

@@ -103,6 +103,11 @@ var CLASSES = [
   {id:'battle_bard',name:'Barde de Guerre',hp:120,spd:8.0,wep:'lute',icon:'fa-solid fa-guitar',desc:'Bonus d\'équipe massifs.',shopPrice:10500, jump: 9.0, weight:1.0, special:{name:'Chanson', cd:15.0, desc:'Boost tous les alliés'}},
   {id:'arcane_archer',name:'Archer Arcanique',hp:100,spd:8.0,wep:'bow',icon:'fa-solid fa-wand-magic',desc:'Flèches magiques variées.',shopPrice:11500, jump: 9.5, weight:0.9, special:{name:'Pluie Magique', cd:12.0, desc:'Flèches multiples'}},
   {id:'berserker',name:'Berserker',hp:200,spd:7.5,wep:'greatsword',icon:'fa-solid fa-axe-battle',desc:'Plus de dégâts si PV bas.',shopPrice:8500, jump: 8.0, weight:1.4, special:{name:'Rage', cd:10.0, desc:'Dégâts +100% pendant 10s'}},
+
+  // ==================== SPECIFIC-CHALLENGE CHARACTERS ====================
+  {id:'void_huntress',name:'Void Huntress',hp:105,spd:8.6,wep:'void_staff',icon:'fa-solid fa-bullseye',desc:'Precision et ombres entremlees.',unlockReq:'Win Desert as Ranger with VOID_STAFF equipped', specificUnlock:{biomeId:'desert', classId:'ranger', weaponId:'VOID_STAFF'}, jump: 9.2, weight:0.9, special:{name:'Phase Dash', cd:5.0, desc:'Dash qui traverse les ennemis'}},
+  {id:'iron_myrmidon',name:'Iron Myrmidon',hp:185,spd:6.7,wep:'mace',icon:'fa-solid fa-shield',desc:'Tank offensif qui tient la ligne.',unlockReq:'Win Dungeon as Knight with MACE equipped', specificUnlock:{biomeId:'dungeon', classId:'knight', weaponId:'MACE'}, jump: 7.4, weight:1.5, special:{name:'Impact Guard', cd:7.0, desc:'Bond court avec reduction massive des degats'}},
+  {id:'storm_revenant',name:'Storm Revenant',hp:120,spd:8.1,wep:'lightning_rod',icon:'fa-solid fa-bolt',desc:'Mobilite eclair et chaines de foudre.',unlockReq:'Win Atlantis as Necro with LIGHTNING_ROD equipped', specificUnlock:{biomeId:'atlantis', classId:'necro', weaponId:'LIGHTNING_ROD'}, jump: 9.0, weight:1.0, special:{name:'Thunder Blink', cd:4.5, desc:'Teleportation courte qui electrocute'}},
   
   // BOSS CLASSES
   {id:'boss_goblin',name:'Chef Gobelin',hp:250,spd:6.0,wep:'axe',icon:'fa-solid fa-user-gear',desc:'Chance et corps à corps.',linkedBiome:'plains',unlockReq:'Cartes: Plaines', jump: 8.0, weight:1.2, special:{name:'Horde', cd:15.0, desc:'Invoque 3 gobelins'}},

@@ -170,6 +170,91 @@ canvas#main { display:block; position:fixed; inset:0; cursor:none; }
 /* Scepter HUD info */
 #scepterStats{position:absolute;bottom:20px;left:20px;color:#6a5a4a;font-size:10px;font-family:'Cinzel',serif;}
 
+#runLoadoutHud {
+  position: absolute;
+  left: 20px;
+  bottom: 38px;
+  max-width: min(75vw, 980px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #d8c7a8;
+  text-shadow: 0 1px 2px #000;
+}
+
+#runLoadoutLineWeapons,
+#runLoadoutLinePassives {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(120, 92, 60, 0.55);
+  background: rgba(0, 0, 0, 0.56);
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#runLoadoutLineWeapons {
+  color: #e6d2b0;
+}
+
+#runLoadoutLinePassives {
+  color: #b8d4b8;
+}
+
+.run-slot-tag {
+  display: inline-block;
+  min-width: 30px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: 9px;
+  text-align: center;
+}
+
+.slot-lmb {
+  color: #ffd7a0;
+  border-color: rgba(255, 170, 90, 0.6);
+  background: rgba(140, 80, 24, 0.35);
+}
+
+.slot-rmb {
+  color: #b6d9ff;
+  border-color: rgba(120, 180, 255, 0.6);
+  background: rgba(30, 72, 120, 0.35);
+}
+
+.run-sep {
+  color: #7b6953;
+}
+
+@media (max-width: 900px) {
+  #runLoadoutHud {
+    left: 10px;
+    right: 10px;
+    bottom: 30px;
+    max-width: none;
+    font-size: 9px;
+  }
+
+  #runLoadoutLineWeapons,
+  #runLoadoutLinePassives {
+    padding: 3px 6px;
+    gap: 4px;
+  }
+
+  #scepterStats {
+    bottom: 8px;
+    left: 10px;
+    font-size: 9px;
+  }
+}
+
 /* crosshair */
 #xh{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
   width:20px;height:20px;pointer-events:none;}

@@ -36,10 +36,40 @@ var GameState = {
   // Upgrades
   playerUpgrades: {},
   weaponPaths: {},
+  inventory: {
+    mainWeapons: [null, null, null, null, null, null],
+    autoWeapons: [],
+    passives: [null, null, null, null, null, null]
+  },
 
   // UI State
   galleryMode: false, autoUpgrade: false,
+  mainWeaponsEnabled: true,
+  autoAttackEnabled: true,
 
   // Save data
-  saveData: { wins: {}, unlockedClasses: ['mage', 'knight'], unlockedBiomes: ['plains'], cards: [], money: 0, gold: 0, permUpgrades: {}, unlockedCosmetics: ['default'], equippedCosmetic: 'default', unlockedThemes: ['medieval'], selectedTheme: 'medieval', settings: { view: 0, particles: 1 } }
+  saveData: {
+    wins: {},
+    unlockedClasses: ['mage', 'knight'],
+    unlockedBiomes: ['plains'],
+    cards: [],
+    cardStacks: {},
+    unlockedBySpecificConditions: {},
+    marketRelics: {},
+    money: 0,
+    gold: 0,
+    permUpgrades: {},
+    unlockedCosmetics: ['default'],
+    equippedCosmetic: 'default',
+    unlockedThemes: ['medieval'],
+    selectedTheme: 'medieval',
+    selectedBiomeId: 'plains',
+    normalUnlockTier: 0,
+    loadout: {
+      mainWeapons: [null, null, null, null, null, null],
+      autoWeapons: [],
+      passives: [null, null, null, null, null, null]
+    },
+    settings: { view: 0, particles: 1 }
+  }
 };
