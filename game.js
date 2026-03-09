@@ -11,6 +11,8 @@ var groundTex;
 var vm, vmModel, vmModelLeft, vmRecoil = 0;
 var SPD = 7.5;
 var playerModel, playerParts, playerTypeData;
+var loadoutHaloRoot = null, loadoutHaloWeapons = null, loadoutHaloItems = null;
+var loadoutHaloRing = null, loadoutHaloSig = '';
 
 // ==================== CONSTANTS ====================
 const CHUNK_SZ = 60;
@@ -79,6 +81,174 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { GameState };
 }
 
+function _loadoutVisualHash(id) {
+  const src = String(id || 'unknown');
+  let h = 0;
+  for (let i = 0; i < src.length; i++) h = (h * 33 + src.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function getLoadoutVisualSignature() {
+  const inv = GameState && GameState.inventory ? GameState.inventory : null;
+  if (!inv) return '';
+  const main = Array.isArray(inv.mainWeapons) ? inv.mainWeapons : [];
+  const pass = Array.isArray(inv.passives) ? inv.passives : [];
+  const mainSig = main.map((w) => w && w.id ? `${w.id}:${w.level || 1}` : '-').join('|');
+  const passSig = pass.map((p) => p && p.id ? `${p.id}:${p.level || 1}` : '-').join('|');
+  return `${mainSig}#${passSig}`;
+}
+
+function ensureLoadoutHaloRoot() {
+  if (!playerPivot) return;
+  if (loadoutHaloRoot && loadoutHaloRoot.parent === playerPivot) return;
+
+  loadoutHaloRoot = new THREE.Group();
+  loadoutHaloRoot.position.set(0, 2.85, 0);
+  loadoutHaloRoot.visible = false;
+  loadoutHaloRoot.renderOrder = 120;
+  playerPivot.add(loadoutHaloRoot);
+
+  loadoutHaloWeapons = new THREE.Group();
+  loadoutHaloItems = new THREE.Group();
+  loadoutHaloRoot.add(loadoutHaloWeapons);
+  loadoutHaloRoot.add(loadoutHaloItems);
+
+  const ringGeo = new THREE.TorusGeometry(0.95, 0.045, 10, 40);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffc86a, transparent: true, opacity: 0.7, depthWrite: false });
+  loadoutHaloRing = new THREE.Mesh(ringGeo, ringMat);
+  loadoutHaloRing.rotation.x = Math.PI / 2;
+  loadoutHaloRing.position.y = 0;
+  loadoutHaloWeapons.add(loadoutHaloRing);
+}
+
+function clearGroupChildren(group, keepFirstChild) {
+  if (!group) return;
+  for (let i = group.children.length - 1; i >= 0; i--) {
+    if (keepFirstChild && i === 0) continue;
+    const c = group.children[i];
+    group.remove(c);
+    if (c.geometry && typeof c.geometry.dispose === 'function') c.geometry.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach((m) => m && m.dispose && m.dispose());
+      else if (typeof c.material.dispose === 'function') c.material.dispose();
+    }
+  }
+}
+
+function rebuildLoadoutHaloVisuals() {
+  ensureLoadoutHaloRoot();
+  if (!loadoutHaloRoot) return;
+
+  const inv = GameState && GameState.inventory ? GameState.inventory : null;
+  const weaponEntries = inv && Array.isArray(inv.mainWeapons)
+    ? inv.mainWeapons.filter((w) => w && w.id)
+    : [];
+  const passiveEntries = inv && Array.isArray(inv.passives)
+    ? inv.passives.filter((p) => p && p.id)
+    : [];
+
+  clearGroupChildren(loadoutHaloWeapons, true);
+  clearGroupChildren(loadoutHaloItems, false);
+
+  if (!weaponEntries.length && !passiveEntries.length) {
+    loadoutHaloRoot.visible = false;
+    return;
+  }
+
+  loadoutHaloRoot.visible = true;
+
+  const wepRadius = 0.95;
+  for (let i = 0; i < weaponEntries.length; i++) {
+    const we = weaponEntries[i];
+    const a = (i / Math.max(1, weaponEntries.length)) * Math.PI * 2;
+    const h = _loadoutVisualHash(we.id);
+    const col = new THREE.Color().setHSL((h % 360) / 360, 0.75, 0.58);
+
+    const shapeType = h % 3;
+    const geo = shapeType === 0
+      ? new THREE.BoxGeometry(0.15, 0.15, 0.15)
+      : (shapeType === 1 ? new THREE.OctahedronGeometry(0.1, 0) : new THREE.ConeGeometry(0.11, 0.22, 8));
+    const mat = new THREE.MeshBasicMaterial({ color: col.getHex(), transparent: true, opacity: 0.95, depthWrite: false });
+    const marker = new THREE.Mesh(geo, mat);
+    marker.position.set(Math.cos(a) * wepRadius, 0, Math.sin(a) * wepRadius);
+    marker.userData.weaponId = we.id;
+    marker.userData.spin = 1.6 + (h % 7) * 0.18;
+    marker.userData.bob = 0.02 + (h % 3) * 0.008;
+    loadoutHaloWeapons.add(marker);
+  }
+
+  const itemRadius = 0.55;
+  for (let j = 0; j < passiveEntries.length; j++) {
+    const pe = passiveEntries[j];
+    const a = (j / Math.max(1, passiveEntries.length)) * Math.PI * 2;
+    const def = (typeof getPassiveItemDef === 'function') ? getPassiveItemDef(pe.id) : null;
+    const h = _loadoutVisualHash(pe.id);
+    const col = def && def.statKey
+      ? new THREE.Color().setHSL((_loadoutVisualHash(def.statKey) % 360) / 360, 0.7, 0.6)
+      : new THREE.Color().setHSL((h % 360) / 360, 0.6, 0.62);
+
+    const geo = new THREE.SphereGeometry(0.08, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: col.getHex(), transparent: true, opacity: 0.85, depthWrite: false });
+    const marker = new THREE.Mesh(geo, mat);
+    marker.position.set(Math.cos(a) * itemRadius, 0.55, Math.sin(a) * itemRadius);
+    marker.userData.spin = -1.2 - (h % 5) * 0.16;
+    marker.userData.bob = 0.018 + (h % 4) * 0.006;
+    loadoutHaloItems.add(marker);
+  }
+}
+
+window.getWeaponHaloWorldPos = function(weaponId) {
+  if (!loadoutHaloWeapons || !weaponId) return null;
+  const key = String(weaponId).toUpperCase();
+  for (let i = 0; i < loadoutHaloWeapons.children.length; i++) {
+    const child = loadoutHaloWeapons.children[i];
+    if (!child || child === loadoutHaloRing || !child.userData) continue;
+    if (String(child.userData.weaponId || '').toUpperCase() !== key) continue;
+    const out = new THREE.Vector3();
+    child.getWorldPosition(out);
+    return out;
+  }
+  return null;
+};
+
+function updateLoadoutHaloVisuals(dt) {
+  if (!GameState || !GameState.gameRunning) {
+    if (loadoutHaloRoot) loadoutHaloRoot.visible = false;
+    return;
+  }
+
+  ensureLoadoutHaloRoot();
+  if (!loadoutHaloRoot) return;
+
+  const sig = getLoadoutVisualSignature();
+  if (sig !== loadoutHaloSig) {
+    loadoutHaloSig = sig;
+    rebuildLoadoutHaloVisuals();
+  }
+
+  if (!loadoutHaloRoot.visible) return;
+
+  const t = GameState.pT || 0;
+  if (loadoutHaloWeapons) {
+    loadoutHaloWeapons.rotation.y += dt * 0.9;
+    for (let i = 0; i < loadoutHaloWeapons.children.length; i++) {
+      const c = loadoutHaloWeapons.children[i];
+      if (!c || c === loadoutHaloRing) continue;
+      c.rotation.y += dt * (c.userData.spin || 1.0);
+      c.position.y = Math.sin(t * 2.2 + i) * (c.userData.bob || 0.02);
+    }
+  }
+  if (loadoutHaloItems) {
+    loadoutHaloItems.rotation.y -= dt * 0.65;
+    for (let i = 0; i < loadoutHaloItems.children.length; i++) {
+      const c = loadoutHaloItems.children[i];
+      if (!c) continue;
+      c.rotation.x += dt * 0.9;
+      c.rotation.z += dt * (c.userData.spin || -1.0);
+      c.position.y = 0.55 + Math.sin(t * 2.6 + i * 0.7) * (c.userData.bob || 0.02);
+    }
+  }
+}
 // ==================== MODULE OWNERSHIP ====================
 // Legacy monolith blocks removed: spawning, environment, and progression logic
 // are now owned by `game-spawning.js`, `game-environment.js`, and
@@ -234,6 +404,8 @@ window.continueToNextLoop = function() {
   // Update HUD
   updateUpgradesHUD();
   updateWeaponVisuals();
+  loadoutHaloSig = '';
+  rebuildLoadoutHaloVisuals();
   
   // Notification
   const diffBonus = Math.floor(GameState.loopLevel * 50);
@@ -287,6 +459,9 @@ window.startGame = function() {
   GameState.pDmgMult = 1.0;
   GameState.pGoldMult = 1.0;
   GameState.pSpdMult = 1.0;
+  GameState.pLevelUpRerolls = 0;
+  GameState.pLevelUpExtraCards = 0;
+  GameState.pLevelUpBans = 0;
   
   if (GameState.saveData.permUpgrades) {
       PERM_UPGRADES.forEach(u => {
@@ -300,10 +475,19 @@ window.startGame = function() {
                   else if (u.stat === 'pDmgRed') GameState.pDmgRed += u.val * lvl;
                   else if (u.stat === 'pLuck') GameState.pLuck += u.val * lvl;
                   else if (u.stat === 'spdMult') GameState.pSpdMult += u.val * lvl;
+                    else if (u.stat === 'lvlRerolls') GameState.pLevelUpRerolls += Math.floor(u.val * lvl);
+                    else if (u.stat === 'lvlCards') GameState.pLevelUpExtraCards += Math.floor(u.val * lvl);
+                    else if (u.stat === 'lvlBans') GameState.pLevelUpBans += Math.floor(u.val * lvl);
               }
           }
       });
   }
+
+            // Reset run-scoped level-up utilities from permanent upgrades.
+            GameState.levelUpRerollsLeft = Math.max(0, Math.floor(GameState.pLevelUpRerolls || 0));
+            GameState.levelUpBansLeft = Math.max(0, Math.floor(GameState.pLevelUpBans || 0));
+            GameState.levelUpBanMode = false;
+            GameState.levelUpBannedChoices = {};
 
   if (!Array.isArray(GameState.saveData.unlockedCostumes)) GameState.saveData.unlockedCostumes = ['A'];
   if (!GameState.saveData.unlockedCostumes.includes('A')) GameState.saveData.unlockedCostumes.push('A');
@@ -596,6 +780,8 @@ window.startGame = function() {
   renderer.domElement.requestPointerLock();
   for (let i = 0; i < 16; i++) { const a = Math.random() * Math.PI * 2, d = 16 + Math.random() * 12; monsters.push(new Monster(Math.cos(a) * d, Math.sin(a) * d)); }
   addNotif(`⚔ ${GameState.pClass.wep.toUpperCase()} équipé`, '#f0c030');
+  loadoutHaloSig = '';
+  rebuildLoadoutHaloVisuals();
   
   // Force terrain update
   if (playerPivot && playerPivot.position) {
@@ -1093,6 +1279,7 @@ function loop() {
     drawMinimap();
     updateBossPointer(); // Update boss indicator
     updHUD(dt);
+    updateLoadoutHaloVisuals(dt);
 
     // ==================== CAMERA UPDATE ====================
     if (playerPivot && camera) {

@@ -7,7 +7,18 @@ function fwd() {
   return new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(camPitch, camYaw, 0, 'YXZ')).normalize();
 }
 
-function spawnPos() {
+var combatFireContextWeaponKey = null;
+
+function spawnPos(weaponKey) {
+  const key = weaponKey || combatFireContextWeaponKey;
+  if (key && typeof getWeaponHaloWorldPos === 'function') {
+    const haloPos = getWeaponHaloWorldPos(key);
+    if (haloPos) {
+      // Slight upward nudge so shots visually leave the marker center.
+      haloPos.y += 0.05;
+      return haloPos;
+    }
+  }
   // Attaques depuis la hauteur de la caméra
   const cameraHeight = 1.5 * (playerTypeData ? playerTypeData.S || 1.0 : 1.0);
   return playerPivot.position.clone().add(new THREE.Vector3(0, cameraHeight, 0));
@@ -44,8 +55,8 @@ function getPlayerDmg(wep, targetDist = 0) {
 
 var meleeTelegraphs = [];
 
-function spawnMeleeTelegraph(wep) {
-  const pp = playerPivot.position;
+function spawnMeleeTelegraph(wep, origin) {
+  const pp = origin || playerPivot.position;
   const areaMul = GameState.pArea || 1;
   const radius = Math.max(1.2, (wep.range || 3.0) * areaMul);
   const arc = Math.min(Math.PI * 2, Math.max(0.25, wep.arc || 1.2));
@@ -80,14 +91,14 @@ function useMelee(wep) {
   wep.cd = wep.maxCd;
   if (wep.pathControl) wep.cd *= (1 - Math.min(0.28, wep.pathControl * 0.06));
   vmRecoil = 0.5;
-  spawnMeleeTelegraph(wep);
+  const pp = spawnPos();
+  spawnMeleeTelegraph(wep, pp);
 
   // Trigger weapon attack animation
   if (window.vmModel && window.vmModel.userData && window.vmModel.userData.parts) {
     animateWeaponAttack(window.vmModel, wep);
   }
 
-  const pp = playerPivot.position;
   // Use camera yaw for 2D direction (more reliable for melee)
   const aimDir = new THREE.Vector2(-Math.sin(camYaw), -Math.cos(camYaw));
   let hit = false;
@@ -340,7 +351,7 @@ function useWhip() {
   WEAPONS.WHIP.cd = WEAPONS.WHIP.maxCd;
   vmRecoil = 0.4;
 
-  const pp = playerPivot.position;
+  const pp = spawnPos();
   const f = fwd();
 
   monsters.forEach(m => {
@@ -505,7 +516,7 @@ function useLute() {
   if (WEAPONS.LUTE.cd > 0) return;
   WEAPONS.LUTE.cd = WEAPONS.LUTE.maxCd;
   vmRecoil = 0.2;
-  const pp = playerPivot.position;
+  const pp = spawnPos();
   spawnPart(pp, 0xffd700, 10, 5); // Soundwave visual
   addScreenShake(0.05);
   monsters.forEach(m => {
@@ -714,25 +725,114 @@ function fireGenericWeaponByKey(weaponKey) {
   const w = WEAPONS[weaponKey];
   if (!w) return;
 
-  const hashWeapon = (key) => {
-    let h = 2166136261 >>> 0;
-    const s = String(key || 'GENERIC');
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return h >>> 0;
+  const profileFor = (key, wep) => {
+    const k = String(key || '').toUpperCase();
+    const profile = {
+      mode: 'fan',
+      color: (wep.fire ? 0xff5533 : (wep.lightning ? 0xffff55 : (wep.ice ? 0xaaddff : 0x99bbff))),
+      shape: 'diamond',
+      spin: 0,
+      salvo: 1,
+      salvoIntervalMs: 0,
+      burstSpreadMul: 1.0,
+      speedMul: 1.0,
+      lifeMul: 1.0,
+      scale: 0.9,
+      addPierce: 0,
+      addBounce: 0,
+      addBlast: 0,
+      gravity: Number(wep.gravity) || 0,
+      offsetY: 0
+    };
+
+    // Strong explicit overrides for signature weapons.
+    const overrides = {
+      RIFLE: { mode: 'single', shape: 'arrow', scale: 0.52, speedMul: 1.18, lifeMul: 1.2, addPierce: 2, burstSpreadMul: 0.2 },
+      GREATBOW: { mode: 'single', shape: 'arrow', scale: 1.7, speedMul: 1.12, lifeMul: 1.15, addPierce: 2 },
+      BOW: { mode: 'fan', shape: 'arrow', scale: 0.74, speedMul: 1.05, salvo: 1 },
+      CROSSBOW: { mode: 'single', shape: 'arrow', scale: 0.9, speedMul: 1.08, addPierce: 1 },
+      PISTOL: { mode: 'burst', shape: 'circle', scale: 0.5, salvo: 2, salvoIntervalMs: 48, burstSpreadMul: 1.5 },
+      REVOLVER: { mode: 'single', shape: 'circle', scale: 0.62, speedMul: 1.08, addPierce: 1 },
+      KNIFE_VOLLEY: { mode: 'burst', shape: 'arrow', scale: 0.58, salvo: 2, salvoIntervalMs: 38, burstSpreadMul: 1.1, addPierce: 1 },
+      MILLION_EDGE: { mode: 'burst', shape: 'arrow', scale: 0.66, salvo: 3, salvoIntervalMs: 30, burstSpreadMul: 0.8, addPierce: 3 },
+      HOLY_BIBLE: { mode: 'ring', shape: 'box', scale: 0.9, speedMul: 0.8, lifeMul: 1.35, addPierce: 4 },
+      SANCTIFIED_SCRIPTURE: { mode: 'ring', shape: 'box', scale: 1.05, speedMul: 0.85, lifeMul: 1.6, addPierce: 99 },
+      GARLIC_AURA: { mode: 'melee_aura' },
+      SOUL_EATER: { mode: 'melee_aura' },
+      PHIAL_RAIN: { mode: 'rain', shape: 'circle', scale: 0.88, gravity: 12, addBlast: 2, offsetY: 0.35 },
+      TOXIC_MONSOON: { mode: 'rain', shape: 'circle', scale: 1.05, gravity: 12, addBlast: 4, offsetY: 0.45, salvo: 2, salvoIntervalMs: 120 },
+      BONE_SWARM: { mode: 'spray', shape: 'box', scale: 0.78, addBounce: 2, burstSpreadMul: 1.8 },
+      BONE_STORM: { mode: 'spray', shape: 'box', scale: 0.95, addBounce: 3, burstSpreadMul: 2.2, salvo: 2, salvoIntervalMs: 62 },
+      CLOCK_LANCET: { mode: 'beam_fan', shape: 'arrow', scale: 0.72, speedMul: 1.25, addPierce: 3 },
+      INFINITE_CORRIDOR: { mode: 'beam_fan', shape: 'arrow', scale: 0.9, speedMul: 1.35, addPierce: 6, salvo: 2, salvoIntervalMs: 82 },
+      MANA_CHANT: { mode: 'ring', shape: 'star', scale: 0.92, speedMul: 0.82, lifeMul: 1.45 },
+      MELODY_OF_ABYSS: { mode: 'ring', shape: 'star', scale: 1.02, speedMul: 0.85, lifeMul: 1.8, addPierce: 3 },
+      THUNDER_DRUM: { mode: 'single', shape: 'diamond', scale: 1.15, addBlast: 2, speedMul: 1.08 },
+      TEMPEST_FINALE: { mode: 'burst', shape: 'diamond', scale: 1.15, salvo: 2, salvoIntervalMs: 72, addBlast: 4, speedMul: 1.12 },
+      RUNE_TRACER: { mode: 'spray', shape: 'diamond', scale: 0.72, addBounce: 3, burstSpreadMul: 2.0, salvo: 2, salvoIntervalMs: 36 },
+      OMEGA_TRACER: { mode: 'spray', shape: 'diamond', scale: 0.9, addBounce: 6, addPierce: 3, burstSpreadMul: 2.2, salvo: 3, salvoIntervalMs: 30 },
+      HEAVEN_BIRDS: { mode: 'orbit_fan', shape: 'tri', scale: 0.82, speedMul: 0.95, lifeMul: 1.35, addPierce: 1, salvo: 2, salvoIntervalMs: 84 },
+      COSMOS_FALCON: { mode: 'orbit_fan', shape: 'tri', scale: 0.96, speedMul: 1.08, lifeMul: 1.6, addPierce: 4, salvo: 2, salvoIntervalMs: 64 },
+      SILVER_WIND: { mode: 'returning', shape: 'tri', scale: 0.8, speedMul: 1.05, lifeMul: 1.2, addPierce: 1, salvo: 2, salvoIntervalMs: 46 },
+      FESTIVAL_OF_WINDS: { mode: 'returning', shape: 'tri', scale: 0.98, speedMul: 1.12, lifeMul: 1.35, addPierce: 4, salvo: 3, salvoIntervalMs: 34 },
+      CELESTIAL_BELLS: { mode: 'ring', shape: 'star', scale: 0.86, speedMul: 0.84, lifeMul: 1.5, addPierce: 2, salvo: 2, salvoIntervalMs: 92 },
+      SERAPHIC_CARILLON: { mode: 'ring', shape: 'star', scale: 1.02, speedMul: 0.9, lifeMul: 1.85, addPierce: 6, salvo: 2, salvoIntervalMs: 76 },
+      PHOENIX_ASH: { mode: 'burst', shape: 'diamond', scale: 1.02, speedMul: 1.06, addBlast: 1, salvo: 2, salvoIntervalMs: 68 },
+      APOCALYPSE_PLUME: { mode: 'burst', shape: 'diamond', scale: 1.18, speedMul: 1.1, addBlast: 3, addPierce: 2, salvo: 3, salvoIntervalMs: 58 },
+      RAZOR_GALE: { mode: 'returning', shape: 'tri', scale: 0.86, speedMul: 1.08, lifeMul: 1.15, addPierce: 2, salvo: 2, salvoIntervalMs: 42 },
+      HURRICANE_RAZORS: { mode: 'returning', shape: 'tri', scale: 1.0, speedMul: 1.14, lifeMul: 1.35, addPierce: 4, salvo: 3, salvoIntervalMs: 34 },
+      ARCANE_ORB: { mode: 'orbit_fan', shape: 'circle', scale: 0.82, speedMul: 0.92, lifeMul: 1.2 },
+      ASTRAL_ORBIT: { mode: 'orbit_fan', shape: 'circle', scale: 0.96, speedMul: 0.95, lifeMul: 1.4, salvo: 2, salvoIntervalMs: 96 },
+      SAW_BLADE: { mode: 'returning', shape: 'circle', scale: 0.9, spin: 14, addPierce: 1 },
+      COSMIC_RIPSAW: { mode: 'returning', shape: 'circle', scale: 1.05, spin: 18, addPierce: 3, salvo: 2 },
+      LIGHTNING_ROD: { mode: 'single', shape: 'diamond', scale: 0.9, addBlast: 1, speedMul: 1.15 },
+      THUNDER_LOOP: { mode: 'burst', shape: 'diamond', scale: 1.0, salvo: 2, salvoIntervalMs: 44, addBlast: 2, speedMul: 1.2 },
+      CHAIN_LIGHTNING: { mode: 'beam_fan', shape: 'diamond', scale: 0.88, speedMul: 1.18, addPierce: 2 },
+      JUDGMENT_CHAIN: { mode: 'beam_fan', shape: 'diamond', scale: 1.02, speedMul: 1.3, addPierce: 5 },
+      FIRE_STAFF: { mode: 'fan', shape: 'diamond', scale: 0.9, addBlast: 1, speedMul: 1.05 },
+      HELLFIRE_STAFF: { mode: 'burst', shape: 'diamond', scale: 1.1, salvo: 2, salvoIntervalMs: 58, addBlast: 3, speedMul: 1.1 },
+      POTION: { mode: 'rain', shape: 'circle', scale: 0.82, gravity: 11, addBlast: 1, offsetY: 0.28 },
+      LA_BORRA: { mode: 'rain', shape: 'circle', scale: 0.95, gravity: 11, addBlast: 3, offsetY: 0.4, salvo: 2, salvoIntervalMs: 108 },
+      SIEGE_MORTAR: { mode: 'lob', shape: 'circle', scale: 1.3, gravity: 14, addBlast: 3, speedMul: 0.9 },
+      OBLIVION_MORTAR: { mode: 'lob', shape: 'circle', scale: 1.5, gravity: 14, addBlast: 6, speedMul: 0.92, salvo: 2, salvoIntervalMs: 132 },
+      GRIMOIRE: { mode: 'ring', shape: 'box', scale: 0.84, speedMul: 0.86, lifeMul: 1.35 },
+      UNHOLY_VESPERS: { mode: 'ring', shape: 'box', scale: 0.96, speedMul: 0.82, lifeMul: 1.75, addPierce: 90 },
+      STAR_GLOBE: { mode: 'spray', shape: 'star', scale: 0.9, speedMul: 0.9, lifeMul: 1.3 },
+      NOVA_TOME: { mode: 'ring', shape: 'star', scale: 0.86, speedMul: 0.86, lifeMul: 1.25 },
+      APOCALYPSE_TOME: { mode: 'ring', shape: 'star', scale: 1.02, speedMul: 0.8, lifeMul: 1.6, salvo: 2, salvoIntervalMs: 88 },
+      PHANTOM_TAROT: { mode: 'spray', shape: 'diamond', scale: 0.8, addBounce: 1 },
+      ARCANA_STORM: { mode: 'spray', shape: 'diamond', scale: 0.95, addBounce: 3, salvo: 2, salvoIntervalMs: 52 },
+      ROCK: { mode: 'lob', shape: 'circle', scale: 1.25, gravity: 10, addBlast: 1 },
+      RUNE_CANNON: { mode: 'lob', shape: 'circle', scale: 1.45, gravity: 10, addBlast: 4 },
+      FATE_NEEDLE: { mode: 'burst', shape: 'arrow', scale: 0.55, salvo: 2, salvoIntervalMs: 34, speedMul: 1.15 },
+      FATE_WEAVER: { mode: 'burst', shape: 'arrow', scale: 0.68, salvo: 3, salvoIntervalMs: 28, speedMul: 1.25, addPierce: 2 }
+    };
+
+    if (overrides[k]) return Object.assign(profile, overrides[k]);
+
+    if (k.includes('MORTAR') || k.includes('BOMB')) profile.mode = 'lob';
+    else if (k.includes('POTION') || k.includes('FLASK') || k.includes('RAIN')) profile.mode = 'rain';
+    else if (k.includes('RIFLE') || k.includes('LANCET') || k.includes('RAIL')) profile.mode = 'beam_fan';
+    else if (k.includes('ORB') || k.includes('BIBLE') || k.includes('GRIMOIRE') || k.includes('TOME')) profile.mode = 'ring';
+    else if (k.includes('SHURIKEN') || k.includes('TAROT') || k.includes('CARD') || k.includes('BONE')) profile.mode = 'spray';
+    else if (k.includes('SAW') || k.includes('DISC') || k.includes('BOOMERANG') || k.includes('GLAIVE')) profile.mode = 'returning';
+    else if (k.includes('DRUM') || k.includes('SPARK') || k.includes('LIGHTNING') || k.includes('CHAIN')) profile.mode = 'burst';
+    else profile.mode = 'fan';
+
+    return profile;
   };
-  const h = hashWeapon(weaponKey);
-  const shapes = ['diamond', 'circle', 'tri', 'arrow', 'box', 'star'];
-  const genericShape = shapes[h % shapes.length];
-  const genericSpin = ((h >> 8) % 3 === 0) ? (6 + ((h >> 4) % 12)) : 0;
-  const genericZigAmp = ((h >> 13) % 5 === 0) ? 0.05 : 0;
-  const genericZigFreq = 5 + (h % 7);
+
+  const profile = profileFor(weaponKey, w);
 
   // Generic melee fallback for unmapped close-range kits.
-  if (w.kind === 'melee' || (w.range !== undefined && !w.speed)) {
-    useMelee(w);
+  if (profile.mode === 'melee_aura' || w.kind === 'melee' || (w.range !== undefined && !w.speed)) {
+    const auraWep = Object.assign({}, w);
+    if (profile.mode === 'melee_aura') {
+      auraWep.range = Math.max(auraWep.range || 2.8, auraWep.range || 2.8);
+      auraWep.arc = Math.PI * 2;
+      auraWep.maxCd = Math.min(Number(auraWep.maxCd) || 0.3, 0.24);
+    }
+    useMelee(auraWep);
     return;
   }
 
@@ -743,42 +843,162 @@ function fireGenericWeaponByKey(weaponKey) {
   const baseDir = fwd();
   const count = Math.max(1, Number(w.count) || 1);
   const spread = Number(w.spread) || 0;
-  const speed = Number(w.speed) || 30;
-  const life = Number(w.life) || 1.8;
+  const speed = (Number(w.speed) || 30) * (profile.speedMul || 1);
+  const life = (Number(w.life) || 1.8) * (profile.lifeMul || 1);
+  const salvo = Math.max(1, Number(profile.salvo) || 1);
+  const defaultSalvoDelay = (profile.mode === 'burst') ? 55
+    : ((profile.mode === 'rain' || profile.mode === 'lob') ? 90
+      : ((profile.mode === 'ring' || profile.mode === 'orbit_fan') ? 75 : 45));
+  const salvoDelayMs = Math.max(0, Number(profile.salvoIntervalMs) || (salvo > 1 ? defaultSalvoDelay : 0));
 
-  for (let i = 0; i < count; i++) {
-    const d = baseDir.clone();
-    if (count > 1 || spread > 0) {
-      d.x += (Math.random() - 0.5) * spread;
-      d.y += (Math.random() - 0.5) * spread;
-      d.z += (Math.random() - 0.5) * spread;
+  const emitPatternVfx = (mode, origin, color, strength) => {
+    const c = Number(color) || 0xffffff;
+    const s = Math.max(1, Math.floor(strength || 4));
+    const lowFx = !!(GameState && GameState.saveData && GameState.saveData.settings && GameState.saveData.settings.particles === 0);
+    const userFx = Math.max(20, Math.min(100, Number(GameState && GameState.saveData && GameState.saveData.settings && GameState.saveData.settings.vfxIntensity) || 70)) / 100;
+    const particleLoad = (typeof particles !== 'undefined' && particles) ? particles.length : 0;
+    const perfMul = particleLoad > 260 ? 0.5 : (particleLoad > 140 ? 0.72 : 1);
+    const densityMul = (lowFx ? 0.42 : 0.72) * perfMul * userFx;
+    const cfg = {
+      single: { count: 3, spread: 2 },
+      beam_fan: { count: 4, spread: 3 },
+      burst: { count: 6, spread: 4 },
+      spray: { count: 6, spread: 4 },
+      ring: { count: 5, spread: 3 },
+      rain: { count: 7, spread: 5 },
+      lob: { count: 7, spread: 5 },
+      returning: { count: 4, spread: 3 },
+      orbit_fan: { count: 5, spread: 3 },
+      fan: { count: 4, spread: 3 }
+    }[mode] || { count: 5, spread: 3 };
+
+    const n = Math.max(1, Math.floor((cfg.count + s) * densityMul));
+    spawnPart(origin, c, n, cfg.spread + Math.floor(s * 0.35));
+    if (mode === 'lob' || mode === 'rain') {
+      addScreenShake(Math.min(0.14, 0.03 + (Number(profile.addBlast) || 0) * 0.01));
+    }
+  };
+
+  const pushPatternProjectile = (origin, dir, spreadMul) => {
+    const d = dir.clone();
+    const s = spread * (spreadMul || 1);
+    if (s > 0) {
+      d.x += (Math.random() - 0.5) * s;
+      d.y += (Math.random() - 0.5) * s;
+      d.z += (Math.random() - 0.5) * s;
       d.normalize();
     }
-
     projectiles.push(new Proj(
-      pos,
+      origin,
       d,
       getPlayerDmg(w),
-      w.fire ? 0xff5500 : (w.lightning ? 0xffff55 : (w.ice ? 0xaaddff : 0x99bbff)),
+      profile.color,
       speed,
       life,
       {
-        pierce: Number(w.pierce) || 0,
-        bounce: Number(w.bounce) || 0,
+        pierce: Math.max(0, (Number(w.pierce) || 0) + (Number(profile.addPierce) || 0)),
+        bounce: Math.max(0, (Number(w.bounce) || 0) + (Number(profile.addBounce) || 0)),
         homing: Number(w.homing) || 0,
-        blast: Number(w.blast) || 0,
-        boomerang: !!w.boomerang,
-        gravity: Number(w.gravity) || 0,
+        blast: Math.max(0, (Number(w.blast) || 0) + (Number(profile.addBlast) || 0)),
+        boomerang: !!w.boomerang || profile.mode === 'returning' || profile.mode === 'orbit_fan' || profile.mode === 'ring',
+        gravity: Number(profile.gravity),
         fire: !!w.fire,
         ice: !!w.ice,
         lightning: !!w.lightning,
-        scale: 0.85,
-        shape: genericShape,
-        spin: genericSpin,
-        zigzagAmp: genericZigAmp,
-        zigzagFreq: genericZigFreq
+        scale: Number(profile.scale) || 0.85,
+        shape: profile.shape || 'diamond',
+        spin: Number(profile.spin) || 0,
+        zigzagAmp: profile.mode === 'spray' ? 0.04 : 0,
+        zigzagFreq: profile.mode === 'spray' ? 7 : 5
       }
     ));
+  };
+
+  const fireSalvoStep = (salvoIdx) => {
+    if (!GameState || !GameState.gameRunning || GameState.levelingUp) return;
+    const originNow = spawnPos(weaponKey);
+    const baseNow = fwd();
+
+    if (profile.mode === 'single') {
+      pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0, 0)), baseNow, 0.25);
+      emitPatternVfx(profile.mode, originNow, profile.color, 3);
+      return;
+    }
+    if (profile.mode === 'beam_fan') {
+      for (let i = 0; i < count; i++) {
+        const t = count <= 1 ? 0 : (i / (count - 1) - 0.5);
+        const d = baseNow.clone();
+        d.x += t * Math.max(0.03, spread);
+        d.normalize();
+        pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0, 0)), d, 0.2);
+      }
+      emitPatternVfx(profile.mode, originNow, profile.color, 4);
+      return;
+    }
+    if (profile.mode === 'burst') {
+      for (let i = 0; i < count; i++) {
+        pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0, 0)), baseNow, profile.burstSpreadMul || 1.3);
+      }
+      emitPatternVfx(profile.mode, originNow, profile.color, 5);
+      return;
+    }
+    if (profile.mode === 'spray') {
+      for (let i = 0; i < count; i++) {
+        const d = new THREE.Vector3(baseNow.x + (Math.random() - 0.5), baseNow.y + (Math.random() - 0.5), baseNow.z + (Math.random() - 0.5)).normalize();
+        pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0, 0)), d, (profile.burstSpreadMul || 1.8));
+      }
+      emitPatternVfx(profile.mode, originNow, profile.color, 5);
+      return;
+    }
+    if (profile.mode === 'ring') {
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2 + GameState.pT * 0.8 + salvoIdx * 0.25;
+        const d = new THREE.Vector3(Math.cos(a), 0.08 + Math.sin(a * 0.5) * 0.08, Math.sin(a)).normalize();
+        pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, 0.08 + (profile.offsetY || 0), 0)), d, 0.12);
+      }
+      emitPatternVfx(profile.mode, originNow, profile.color, 4);
+      return;
+    }
+    if (profile.mode === 'rain' || profile.mode === 'lob') {
+      for (let i = 0; i < count; i++) {
+        const d = baseNow.clone();
+        d.y += 0.35 + Math.random() * 0.25;
+        d.normalize();
+        pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0.2, 0)), d, 1.5);
+      }
+      emitPatternVfx(profile.mode, originNow, profile.color, 6);
+      return;
+    }
+    if (profile.mode === 'returning' || profile.mode === 'orbit_fan') {
+      for (let i = 0; i < count; i++) {
+        const t = count <= 1 ? 0 : (i / (count - 1) - 0.5);
+        const d = baseNow.clone();
+        d.x += t * Math.max(0.05, spread * 1.4);
+        d.y += (profile.mode === 'orbit_fan' ? 0.06 : 0);
+        d.normalize();
+        pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0, 0)), d, 0.5);
+      }
+      emitPatternVfx(profile.mode, originNow, profile.color, 4);
+      return;
+    }
+    // fan default
+    for (let i = 0; i < count; i++) {
+      const t = count <= 1 ? 0 : (i / (count - 1) - 0.5);
+      const d = baseNow.clone();
+      d.x += t * spread;
+      d.y += t * spread * 0.35;
+      d.normalize();
+      pushPatternProjectile(originNow.clone().add(new THREE.Vector3(0, profile.offsetY || 0, 0)), d, 0.35);
+    }
+    emitPatternVfx(profile.mode, originNow, profile.color, 3);
+  };
+
+  if (salvo <= 1 || salvoDelayMs <= 0) {
+    fireSalvoStep(0);
+  } else {
+    for (let s = 0; s < salvo; s++) {
+      setTimeout(() => fireSalvoStep(s), s * salvoDelayMs);
+    }
   }
 
   vmRecoil = Math.max(0.12, Math.min(0.45, 0.14 + count * 0.02));
@@ -787,59 +1007,16 @@ function fireGenericWeaponByKey(weaponKey) {
 // ==================== PASSIVE ABILITIES ====================
 
 function fireWeaponByCombatKey(key) {
-  switch (key) {
-    case 'SCEPTER': return fireScepter();
-    case 'BOW': return fireBow();
-    case 'BOOMERANG': return fireBoomerang();
-    case 'SWORD': return useMelee(WEAPONS.SWORD);
-    case 'AXE': return useMelee(WEAPONS.AXE);
-    case 'SPEAR': return useMelee(WEAPONS.SPEAR);
-    case 'HAMMER': return useMelee(WEAPONS.HAMMER);
-    case 'DAGGERS': return useMelee(WEAPONS.DAGGERS);
-    case 'SCYTHE': return useMelee(WEAPONS.SCYTHE);
-    case 'KATANA': return useMelee(WEAPONS.KATANA);
-    case 'FLAIL': return useMelee(WEAPONS.FLAIL);
-    case 'GAUNTLETS': return useMelee(WEAPONS.GAUNTLETS);
-    case 'GRIMOIRE': return fireGrimoire();
-    case 'WHIP': return useWhip();
-    case 'CARDS': return fireCards();
-    case 'PISTOL': return firePistol();
-    case 'TRIDENT': return fireTrident();
-    case 'RIFLE': return fireRifle();
-    case 'SHURIKEN': return fireShuriken();
-    case 'VOID_STAFF': return fireVoidStaff();
-    case 'FIRE_STAFF': return fireFireStaff();
-    case 'LEAF_BLADE': return fireLeafBlade();
-    case 'POTION': return firePotion();
-    case 'LUTE': return useLute();
-    case 'WRENCH': return useMelee(WEAPONS.WRENCH);
-    case 'JAVELIN': return fireJavelin();
-    case 'CROSSBOW': return fireCrossbow();
-    case 'RUNESTONE': return fireRunestone();
-    case 'RAPIER': return useMelee(WEAPONS.RAPIER);
-    case 'BOMB': return fireBomb();
-    case 'TOTEM': return useMelee(WEAPONS.TOTEM);
-    case 'CLAWS': return useMelee(WEAPONS.CLAWS);
-    case 'MACE': return useMelee(WEAPONS.MACE);
-    case 'MIRROR': return fireMirror();
-    case 'REVOLVER': return fireRevolver();
-    case 'NEEDLES': return fireNeedles();
-    case 'LIGHTNING_ROD': return fireLightningRod();
-    case 'ARCANE_ORB': return fireArcaneOrb();
-    case 'ICE_BOW': return fireIceBow();
-    case 'DAGGER_SAC': return useMelee(WEAPONS.DAGGER_SAC);
-    case 'DRILL': return useMelee(WEAPONS.DRILL);
-    case 'STAR_GLOBE': return fireStarGlobe();
-    case 'CLEAVER': return fireCleaver();
-    case 'BALLS': return fireBalls();
-    case 'GREATSWORD': return useMelee(WEAPONS.GREATSWORD);
-    case 'ROCK': return fireRock();
-    case 'BLOWGUN': return fireBlowgun();
-    case 'GREATBOW': return fireGreatbow();
-    case 'DARK_BLADE': return useMelee(WEAPONS.DARK_BLADE);
-    case 'SUN_STAFF': return fireSunStaff();
-    case 'HOURGLASS': return fireHourglass();
-    default: return fireGenericWeaponByKey(key);
+  combatFireContextWeaponKey = key;
+  try {
+    switch (key) {
+      // Keep a few handcrafted support/control kits.
+      case 'WHIP': return useWhip();
+      case 'LUTE': return useLute();
+      default: return fireGenericWeaponByKey(key);
+    }
+  } finally {
+    combatFireContextWeaponKey = null;
   }
 }
 
@@ -879,7 +1056,7 @@ function handleFire() {
 
   if (!fired) {
     var activeKey = Object.keys(WEAPONS).find(function (k) { return WEAPONS[k] && WEAPONS[k].active; });
-    if (activeKey) fireGenericWeaponByKey(activeKey);
+    if (activeKey) fireWeaponByCombatKey(activeKey);
   }
 }
 

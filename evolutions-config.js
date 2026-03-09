@@ -26,7 +26,23 @@ var EVOLUTION_RECIPES = [
   { baseWeaponId: 'RAIL_LANCE', requiredPassiveId: 'hawk_eye', evolvedWeaponId: 'SKY_BREAKER', requiresMaxPassive: false },
   { baseWeaponId: 'NOVA_TOME', requiredPassiveId: 'arcane_ink', evolvedWeaponId: 'APOCALYPSE_TOME', requiresMaxPassive: false },
   { baseWeaponId: 'SIEGE_MORTAR', requiredPassiveId: 'siege_manual', evolvedWeaponId: 'OBLIVION_MORTAR', requiresMaxPassive: false },
-  { baseWeaponId: 'FATE_NEEDLE', requiredPassiveId: 'stone_mask', evolvedWeaponId: 'FATE_WEAVER', requiresMaxPassive: false }
+  { baseWeaponId: 'FATE_NEEDLE', requiredPassiveId: 'stone_mask', evolvedWeaponId: 'FATE_WEAVER', requiresMaxPassive: false },
+
+  // New VS-like branches
+  { baseWeaponId: 'KNIFE_VOLLEY', requiredPassiveId: 'bracer', evolvedWeaponId: 'MILLION_EDGE', requiresMaxPassive: false },
+  { baseWeaponId: 'HOLY_BIBLE', requiredPassiveId: 'spellbinder', evolvedWeaponId: 'SANCTIFIED_SCRIPTURE', requiresMaxPassive: false },
+  { baseWeaponId: 'GARLIC_AURA', requiredPassiveId: 'armor', evolvedWeaponId: 'SOUL_EATER', requiresMaxPassive: false },
+  { baseWeaponId: 'PHIAL_RAIN', requiredPassiveId: 'attractorb', evolvedWeaponId: 'TOXIC_MONSOON', requiresMaxPassive: false },
+  { baseWeaponId: 'BONE_SWARM', requiredPassiveId: 'candelabrador', evolvedWeaponId: 'BONE_STORM', requiresMaxPassive: false },
+  { baseWeaponId: 'CLOCK_LANCET', requiredPassiveId: 'empty_tome', evolvedWeaponId: 'INFINITE_CORRIDOR', requiresMaxPassive: false },
+  { baseWeaponId: 'MANA_CHANT', requiredPassiveId: 'arcane_ink', evolvedWeaponId: 'MELODY_OF_ABYSS', requiresMaxPassive: false },
+  { baseWeaponId: 'THUNDER_DRUM', requiredPassiveId: 'duplicator', evolvedWeaponId: 'TEMPEST_FINALE', requiresMaxPassive: false },
+  { baseWeaponId: 'RUNE_TRACER', requiredPassiveId: 'armor', evolvedWeaponId: 'OMEGA_TRACER', requiresMaxPassive: false },
+  { baseWeaponId: 'HEAVEN_BIRDS', requiredPassiveId: 'clover', evolvedWeaponId: 'COSMOS_FALCON', requiresMaxPassive: false },
+  { baseWeaponId: 'SILVER_WIND', requiredPassiveId: 'spinach', evolvedWeaponId: 'FESTIVAL_OF_WINDS', requiresMaxPassive: false },
+  { baseWeaponId: 'CELESTIAL_BELLS', requiredPassiveId: 'spellbinder', evolvedWeaponId: 'SERAPHIC_CARILLON', requiresMaxPassive: false },
+  { baseWeaponId: 'PHOENIX_ASH', requiredPassiveId: 'spinach', evolvedWeaponId: 'APOCALYPSE_PLUME', requiresMaxPassive: false },
+  { baseWeaponId: 'RAZOR_GALE', requiredPassiveId: 'bracer', evolvedWeaponId: 'HURRICANE_RAZORS', requiresMaxPassive: false }
 ];
 
 function findEvolutionRecipe(baseWeaponId) {

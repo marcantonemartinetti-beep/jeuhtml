@@ -6,5 +6,8 @@ var PERM_UPGRADES = [
   {id:'p_regen', name:'Régénération', icon:'fa-solid fa-leaf', baseCost:300, costMult:1.8, max:10, desc:'+0.2 PV/sec.', stat:'pRegen', val:0.2},
   {id:'p_armor', name:'Peau de Fer', icon:'fa-solid fa-shield-halved', baseCost:250, costMult:1.7, max:10, desc:'-1% Dégâts subis.', stat:'pDmgRed', val:0.01},
   {id:'p_luck', name:'Fortune', icon:'fa-solid fa-clover', baseCost:200, costMult:1.5, max:10, desc:'+5% Chance.', stat:'pLuck', val:0.05},
-  {id:'p_speed', name:'Célérité', icon:'fa-solid fa-person-running', baseCost:400, costMult:2.0, max:5, desc:'+2% Vitesse.', stat:'spdMult', val:0.02}
+  {id:'p_speed', name:'Célérité', icon:'fa-solid fa-person-running', baseCost:400, costMult:2.0, max:5, desc:'+2% Vitesse.', stat:'spdMult', val:0.02},
+  {id:'p_reroll', name:'Relance Tactique', icon:'fa-solid fa-dice', baseCost:550, costMult:2.05, max:8, desc:'+1 Reroll par partie.', stat:'lvlRerolls', val:1},
+  {id:'p_card_count', name:'Choix Supplémentaire', icon:'fa-solid fa-layer-group', baseCost:700, costMult:2.2, max:3, desc:'+1 carte proposée à chaque niveau.', stat:'lvlCards', val:1},
+  {id:'p_ban', name:'Bannissement', icon:'fa-solid fa-ban', baseCost:650, costMult:2.15, max:6, desc:'+1 Ban par partie (retire une carte du pool).', stat:'lvlBans', val:1}
 ];

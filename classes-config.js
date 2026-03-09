@@ -161,3 +161,212 @@ var CLASSES = [
   {id:'boss_cthulhu',name:'Cthulhu',hp:600,spd:5.0,wep:'void_staff',icon:'fa-solid fa-eye',desc:'Zone et exécution.',linkedBiome:'abyss',unlockReq:'Cartes: L\'Abîme', jump: 6.0, weight:2.5, special:{name:'Folie', cd:25.0, desc:'Rend les ennemis fous'}},
   {id:'boss_ultimate',name:'L\'Ultime',hp:999,spd:9.0,wep:'greatbow',icon:'fa-solid fa-infinity',desc:'Puissance absolue.',linkedBiome:'omega',unlockReq:'Cartes: Convergence', jump: 10.0, weight:1.5, special:{name:'Fin', cd:60.0, desc:'Détruit tout à l\'écran'}}
 ];
+
+// ==================== GLOBAL CLASS REBALANCE (META 2026) ====================
+(function rebalanceAllClassesForCurrentMeta() {
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function round1(v) { return Math.round(v * 10) / 10; }
+  function round2(v) { return Math.round(v * 100) / 100; }
+
+  // Targeted remaps to integrate newly added VS-like weapon branches.
+  var thematicWeaponRemap = {
+    apothecary: 'phial_rain',
+    battle_bard: 'mana_chant',
+    fairy_queen: 'heaven_birds',
+    star_guardian: 'celestial_bells',
+    thunder_lord: 'thunder_drum',
+    plague_doctor: 'bone_swarm',
+    arcane_archer: 'rune_tracer',
+    astronomer: 'mana_chant',
+    angel: 'heaven_birds',
+    phoenix: 'phoenix_ash',
+    boss_fairy: 'heaven_birds',
+    boss_storm: 'thunder_drum',
+    boss_archivist: 'celestial_bells',
+    boss_maestro: 'mana_chant'
+  };
+
+  var heavyMelee = {
+    sword: true, axe: true, hammer: true, greatsword: true, mace: true,
+    flail: true, claws: true, gauntlets: true, dark_blade: true
+  };
+
+  var precisionRanged = {
+    bow: true, crossbow: true, rifle: true, revolver: true, pistol: true,
+    greatbow: true, javelin: true, spear: true, trident: true, rune_tracer: true
+  };
+
+  var casterRanged = {
+    scepter: true, void_staff: true, grimoire: true, runestone: true, star_globe: true,
+    sun_staff: true, hourglass: true, mana_chant: true, celestial_bells: true,
+    thunder_drum: true, phial_rain: true, bone_swarm: true, heaven_birds: true,
+    phoenix_ash: true
+  };
+
+  for (var i = 0; i < CLASSES.length; i++) {
+    var c = CLASSES[i];
+    if (!c || !c.id) continue;
+
+    // Fix historical typo and guarantee weight presence.
+    if (typeof c.weight !== 'number' && typeof c.weigth === 'number') c.weight = c.weigth;
+    if (typeof c.weight !== 'number') c.weight = 1.0;
+    if (typeof c.jump !== 'number') c.jump = 8.5;
+
+    if (thematicWeaponRemap[c.id]) c.wep = thematicWeaponRemap[c.id];
+
+    var isBoss = String(c.id).indexOf('boss_') === 0;
+    var isShop = Number(c.shopPrice) > 0;
+    var wep = String(c.wep || '').toLowerCase();
+
+    var hpMin = isBoss ? 180 : (isShop ? 90 : 80);
+    var hpMax = isBoss ? 999 : (isShop ? 240 : 210);
+    var spdMin = isBoss ? 4.0 : 5.5;
+    var spdMax = isBoss ? 9.0 : 9.6;
+    var jumpMin = isBoss ? 5.5 : 6.5;
+    var jumpMax = isBoss ? 10.5 : 11.5;
+    var wMin = isBoss ? 0.6 : 0.65;
+    var wMax = isBoss ? 2.6 : 2.2;
+
+    c.hp = Math.round(clamp(Number(c.hp) || 100, hpMin, hpMax));
+    c.spd = round1(clamp(Number(c.spd) || 7.0, spdMin, spdMax));
+    c.jump = round1(clamp(Number(c.jump) || 8.5, jumpMin, jumpMax));
+    c.weight = round2(clamp(Number(c.weight) || 1.0, wMin, wMax));
+
+    // Weapon-role coherence pass so each character fits new pacing.
+    if (heavyMelee[wep]) {
+      c.hp = Math.round(clamp(c.hp + (isBoss ? 0 : 8), hpMin, hpMax));
+      c.spd = round1(clamp(c.spd - 0.2, spdMin, spdMax));
+      c.weight = round2(clamp(c.weight + 0.05, wMin, wMax));
+    } else if (precisionRanged[wep]) {
+      c.spd = round1(clamp(c.spd + 0.1, spdMin, spdMax));
+      c.jump = round1(clamp(c.jump + 0.2, jumpMin, jumpMax));
+      c.weight = round2(clamp(c.weight - 0.04, wMin, wMax));
+    } else if (casterRanged[wep]) {
+      c.hp = Math.round(clamp(c.hp - (isBoss ? 0 : 4), hpMin, hpMax));
+      c.jump = round1(clamp(c.jump + 0.2, jumpMin, jumpMax));
+      c.weight = round2(clamp(c.weight - 0.03, wMin, wMax));
+    }
+  }
+})();
+
+// ==================== DESCRIPTION PASS (META 2026) ====================
+(function refreshClassDescriptionsForCurrentMeta() {
+  function roleFromWeapon(wep) {
+    var k = String(wep || '').toLowerCase();
+    if (k.indexOf('hourglass') >= 0 || k.indexOf('clock') >= 0) return 'controle';
+    if (k.indexOf('thunder') >= 0 || k.indexOf('lightning') >= 0 || k.indexOf('spark') >= 0) return 'burst';
+    if (k.indexOf('potion') >= 0 || k.indexOf('phial') >= 0 || k.indexOf('flask') >= 0 || k.indexOf('bomb') >= 0 || k.indexOf('mortar') >= 0) return 'zone';
+    if (k.indexOf('grimoire') >= 0 || k.indexOf('scepter') >= 0 || k.indexOf('void') >= 0 || k.indexOf('rune') >= 0 || k.indexOf('mana') >= 0 || k.indexOf('bells') >= 0) return 'caster';
+    if (k.indexOf('bow') >= 0 || k.indexOf('crossbow') >= 0 || k.indexOf('rifle') >= 0 || k.indexOf('revolver') >= 0 || k.indexOf('javelin') >= 0 || k.indexOf('spear') >= 0 || k.indexOf('trident') >= 0) return 'precision';
+    if (k.indexOf('bird') >= 0 || k.indexOf('falcon') >= 0 || k.indexOf('wind') >= 0 || k.indexOf('gale') >= 0 || k.indexOf('razor') >= 0) return 'mobile';
+    if (k.indexOf('claw') >= 0 || k.indexOf('sword') >= 0 || k.indexOf('axe') >= 0 || k.indexOf('katana') >= 0 || k.indexOf('mace') >= 0 || k.indexOf('gauntlets') >= 0 || k.indexOf('scythe') >= 0 || k.indexOf('whip') >= 0 || k.indexOf('rapier') >= 0) return 'melee';
+    return 'hybride';
+  }
+
+  function fmtWeapon(wep) {
+    return String(wep || '').replace(/_/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); });
+  }
+
+  function hpTier(hp) {
+    if (hp >= 230) return 'Tank++';
+    if (hp >= 170) return 'Tank';
+    if (hp >= 120) return 'Bruiser';
+    if (hp >= 95) return 'Equilibre';
+    return 'Fragile';
+  }
+
+  function spdTier(spd) {
+    if (spd >= 8.8) return 'Mobilite S';
+    if (spd >= 8.0) return 'Mobilite A';
+    if (spd >= 7.2) return 'Mobilite B';
+    if (spd >= 6.4) return 'Mobilite C';
+    return 'Mobilite D';
+  }
+
+  function tempoTier(cd) {
+    var c = Number(cd);
+    if (!isFinite(c) || c <= 0) return 'Skill variable';
+    if (c <= 6) return 'Skill frequent';
+    if (c <= 12) return 'Skill regulier';
+    if (c <= 20) return 'Skill impact';
+    return 'Skill long CD';
+  }
+
+  function difficultyTag(c, role) {
+    var hp = Number(c && c.hp) || 100;
+    var spd = Number(c && c.spd) || 7;
+    var cd = Number(c && c.special && c.special.cd) || 12;
+    var score = 0;
+
+    // Higher score = harder to pilot efficiently.
+    if (hp < 95) score += 2;
+    else if (hp < 120) score += 1;
+    if (spd < 6.6) score += 1;
+    if (cd > 18) score += 1;
+    if (role === 'precision' || role === 'mobile') score += 1;
+    if (role === 'melee' && hp >= 150) score -= 1;
+
+    if (score <= 1) return 'Difficulte: Facile';
+    if (score <= 3) return 'Difficulte: Intermediaire';
+    return 'Difficulte: Avancee';
+  }
+
+  function planByRole(role) {
+    if (role === 'melee') return 'Plan: coller les packs, echanger avec sustain/armure.';
+    if (role === 'precision') return 'Plan: kite et focus elites/boss a distance.';
+    if (role === 'caster') return 'Plan: empiler uptime, controle et scaling long run.';
+    if (role === 'zone') return 'Plan: poser des zones, tourner autour des packs.';
+    if (role === 'burst') return 'Plan: fenetres de burst sur vagues denses.';
+    if (role === 'controle') return 'Plan: casser le tempo ennemi, punir le regroupement.';
+    if (role === 'mobile') return 'Plan: hit-and-run permanent, faible exposition.';
+    return 'Plan: build flexible selon drops et evolutions.';
+  }
+
+  function roleLabel(role) {
+    if (role === 'melee') return 'Role: Melee pressure';
+    if (role === 'precision') return 'Role: Precision carry';
+    if (role === 'caster') return 'Role: Caster scaling';
+    if (role === 'zone') return 'Role: Zone control';
+    if (role === 'burst') return 'Role: Burst storm';
+    if (role === 'controle') return 'Role: Tempo control';
+    if (role === 'mobile') return 'Role: Mobile skirmisher';
+    return 'Role: Hybrid';
+  }
+
+  var override = {
+    mage: 'Role: Caster scaling | Fragile | Mobilite A. Scepter + XP pour snowball tres tot.',
+    knight: 'Role: Melee pressure | Tank | Mobilite C. Excellent opener securise pour run longue.',
+    rogue: 'Role: Mobile skirmisher | Fragile | Mobilite S. Pick-off rapide, punit les erreurs ennemies.',
+    sniper: 'Role: Precision carry | Fragile | Mobilite C. Priorite boss/elites, distance obligatoire.',
+    alchemist: 'Role: Zone control | Equilibre | Mobilite A. Gagne en valeur quand la map se densifie.',
+    battle_bard: 'Role: Caster scaling | Bruiser | Mobilite A. Uptime et buffs, tres fort en mid/late.',
+    apothecary: 'Role: Zone control | Equilibre | Mobilite A. Poison constant, excellent anti-horde.',
+    star_guardian: 'Role: Caster scaling | Bruiser | Mobilite A. Controle orbital, pression circulaire.',
+    thunder_lord: 'Role: Burst storm | Bruiser | Mobilite A. Salves explosives et cleanup rapide.',
+    arcane_archer: 'Role: Precision carry | Equilibre | Mobilite A. Trajectoires techniques, bonne polyvalence.',
+    plague_doctor: 'Role: Zone control | Equilibre | Mobilite B. Degats persistants + debuffs de masse.',
+    phoenix: 'Role: Burst storm | Equilibre | Mobilite A. Gros turnarounds, punit les packs compacts.',
+    boss_ultimate: 'Role: Hybrid | Tank++ | Mobilite S. Pression maximale sur toutes phases du run.'
+  };
+
+  for (var i = 0; i < CLASSES.length; i++) {
+    var c = CLASSES[i];
+    if (!c) continue;
+    if (override[c.id]) {
+      c.desc = override[c.id];
+      continue;
+    }
+
+    var role = roleFromWeapon(c.wep);
+    var roleTxt = roleLabel(role);
+    var hpTxt = hpTier(Number(c.hp) || 100);
+    var spdTxt = spdTier(Number(c.spd) || 7);
+    var cd = c && c.special ? c.special.cd : 0;
+    var tempoTxt = tempoTier(cd);
+    var diffTxt = difficultyTag(c, role);
+    var wepTxt = 'Arme: ' + fmtWeapon(c.wep);
+    var isBoss = String(c.id || '').indexOf('boss_') === 0;
+    var bossTag = isBoss ? 'Boss biome. ' : '';
+    c.desc = bossTag + roleTxt + ' | ' + hpTxt + ' | ' + spdTxt + ' | ' + tempoTxt + ' | ' + diffTxt + '. ' + wepTxt + '. ' + planByRole(role);
+  }
+})();

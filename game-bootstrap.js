@@ -56,7 +56,8 @@ function init() {
   if (GameState.saveData.selectedCostume === 'B' && !GameState.saveData.unlockedCostumes.includes('B')) {
     GameState.saveData.selectedCostume = 'A';
   }
-  if (!GameState.saveData.settings) GameState.saveData.settings = { view: 0, particles: 1 };
+  if (!GameState.saveData.settings) GameState.saveData.settings = { view: 0, particles: 1, vfxIntensity: 70 };
+  if (typeof GameState.saveData.settings.vfxIntensity !== 'number') GameState.saveData.settings.vfxIntensity = 70;
   // ---------------------------------------------------------------
 
   if (isInitialized) return;

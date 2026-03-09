@@ -179,7 +179,7 @@
     <div id="runLoadoutLineWeapons"></div>
     <div id="runLoadoutLinePassives"></div>
   </div>
-  <div id="dashInd">DASH [E]</div>
+  <div id="dashInd"></div>
   <div id="bossbar"><div id="bossname">GARDIEN DES OMBRES</div><div id="bosstrk"><div id="bossfill" style="width:100%"></div></div></div>
 </div>
 
@@ -187,7 +187,10 @@
 <div id="lvlUp">
   <h2>NIVEAU SUPÉRIEUR</h2>
   <div class="cards" id="upCards"></div>
-  <button id="rerollBtn" onclick="rerollUpgrades()"><i class="fa-solid fa-dice"></i> REROLL</button>
+  <div class="lvlup-actions">
+    <button id="rerollBtn" onclick="rerollUpgrades()"><i class="fa-solid fa-dice"></i> REROLL</button>
+    <button id="banBtn" onclick="toggleBanMode()"><i class="fa-solid fa-ban"></i> BAN</button>
+  </div>
   <div style="margin-top:15px;display:flex;align-items:center;gap:8px">
     <input type="checkbox" id="autoUpCheck" onchange="toggleAutoUp(this.checked)">
     <label for="autoUpCheck" style="color:#8a6a4a;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.1em">CHOIX AUTOMATIQUE</label>

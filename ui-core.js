@@ -164,7 +164,9 @@ function updHUD(dt) {
       var icon = def && def.icon ? `<i class="${def.icon}"></i> ` : '';
       var lvl = entry.level ? ` L${entry.level}` : '';
       var evo = entry.evolved ? ' *' : '';
-      return `${icon}${formatWeaponName(entry.id)}${lvl}${evo}`;
+      var dmg = def && Number.isFinite(def.dmg) ? ` D:${Math.round(def.dmg)}` : '';
+      var cd = def && Number.isFinite(def.maxCd) ? ` CD:${Number(def.maxCd).toFixed(2)}s` : '';
+      return `${icon}${formatWeaponName(entry.id)}${lvl}${evo}${dmg}${cd}`;
     };
 
     var fmtPassiveEntry = function (entry) {
@@ -190,9 +192,15 @@ function updHUD(dt) {
     runWeaponsLine = `<span style="color:#f0c080">SLOTS:</span> ${slotsLine}`
       + (extras ? ` <span class="run-sep">|</span> <span style="color:#8aa8d8">EXTRA:</span> ${extras}` : '')
       + ` <span class="run-sep">|</span> <span style="color:${autoColor}">AUTO ${autoState}</span> <span style="color:#8a9fb5">(R toggle)</span>`;
+
+    var phaseName = (GameState && GameState.runDirector && GameState.runDirector.phaseName)
+      ? GameState.runDirector.phaseName
+      : 'Eveil';
+    var fpsNow = Math.round((GameState && GameState._perfWindow && GameState._perfWindow.fps) || 60);
     runPassivesLine = `<span style="color:#7ec9ff">NIVEAU:</span> ${Math.max(1, Math.floor(GameState.pLevel || 1))}`
       + ` <span class="run-sep">|</span> <span style="color:#b8d8a8">MODIFICATEURS:</span> ${passives.length ? passives.join(' · ') : '-'}`
-      + ` <span class="run-sep">|</span> <span style="color:#ffd37a">NIVEAUX ILLIMITES</span>`;
+      + ` <span class="run-sep">|</span> <span style="color:#ffd37a">PHASE:</span> ${phaseName}`
+      + ` <span class="run-sep">|</span> <span style="color:#9ac6ff">FPS:</span> ${fpsNow}`;
   }
 
   if (runWeaponsLine !== hudState.runWeaponsLine) {

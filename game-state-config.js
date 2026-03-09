@@ -9,6 +9,7 @@ var GameState = {
   pPickupRange: 3.5,
   pBleedChance: 0, pKnockback: 0,
   pGambler: false, pWindwalker: false, pTank: false, pAssassin: false,
+  pLevelUpRerolls: 0, pLevelUpExtraCards: 0, pLevelUpBans: 0,
 
   // Game state
   invTimer: 0, gameRunning: false, levelingUp: false,
@@ -46,6 +47,10 @@ var GameState = {
   galleryMode: false, autoUpgrade: false,
   mainWeaponsEnabled: true,
   autoAttackEnabled: true,
+  levelUpRerollsLeft: 0,
+  levelUpBansLeft: 0,
+  levelUpBanMode: false,
+  levelUpBannedChoices: {},
 
   // Save data
   saveData: {
@@ -70,6 +75,6 @@ var GameState = {
       autoWeapons: [],
       passives: [null, null, null, null, null, null]
     },
-    settings: { view: 0, particles: 1 }
+    settings: { view: 0, particles: 1, vfxIntensity: 70 }
   }
 };

@@ -10,10 +10,20 @@ var AUTO_WEAPON_POOL = [
   'STAR_GLOBE', 'RUNESTONE', 'MIRROR', 'SHURIKEN', 'CROSSBOW', 'SUN_STAFF', 'BOMB',
   'ARCANE_ORB', 'SAW_BLADE', 'BLOOD_LANCE', 'CHAIN_LIGHTNING',
   'MAGIC_MISSILE', 'SHADOW_DISC', 'CELESTIAL_SPEAR', 'PHANTOM_TAROT', 'DRAGON_SPARK', 'SACRED_FLASK',
-  'RAIL_LANCE', 'NOVA_TOME', 'SIEGE_MORTAR', 'FATE_NEEDLE', 'PLASMA_GLAIVE', 'RUNE_CANNON'
+  'RAIL_LANCE', 'NOVA_TOME', 'SIEGE_MORTAR', 'FATE_NEEDLE', 'PLASMA_GLAIVE', 'RUNE_CANNON',
+  'KNIFE_VOLLEY', 'HOLY_BIBLE', 'PHIAL_RAIN', 'BONE_SWARM', 'CLOCK_LANCET', 'MANA_CHANT', 'THUNDER_DRUM',
+  'RUNE_TRACER', 'HEAVEN_BIRDS', 'SILVER_WIND', 'CELESTIAL_BELLS', 'PHOENIX_ASH', 'RAZOR_GALE'
 ];
 
-var MAIN_WEAPON_POOL = ['SCEPTER', 'BOW', 'DAGGERS', 'RAPIER', 'SWORD', 'SPEAR', 'RIFLE', 'KATANA', 'GREATBOW', 'DARK_BLADE', 'SUN_STAFF', 'VOID_STAFF', 'MOON_SHOT'];
+var MAIN_WEAPON_POOL = [
+  'SCEPTER', 'BOW', 'DAGGERS', 'RAPIER', 'SWORD', 'SPEAR', 'RIFLE', 'KATANA', 'GREATBOW', 'DARK_BLADE',
+  'SUN_STAFF', 'VOID_STAFF', 'MOON_SHOT', 'AXE', 'HAMMER', 'SCYTHE', 'GAUNTLETS', 'WHIP', 'FLAIL',
+  'WRENCH', 'TOTEM', 'CLAWS', 'MACE', 'GREATSWORD', 'DAGGER_SAC', 'DRILL', 'TRIDENT', 'JAVELIN',
+  'CROSSBOW', 'BOOMERANG', 'PISTOL', 'REVOLVER', 'SHURIKEN', 'LEAF_BLADE', 'ICE_BOW', 'ARCANE_ORB',
+  'LIGHTNING_ROD', 'RUNESTONE', 'STAR_GLOBE', 'CLEAVER', 'ROCK', 'BLOWGUN', 'HOURGLASS', 'LUTE',
+  'KNIFE_VOLLEY', 'HOLY_BIBLE', 'GARLIC_AURA', 'PHIAL_RAIN', 'BONE_SWARM', 'CLOCK_LANCET', 'MANA_CHANT', 'THUNDER_DRUM',
+  'RUNE_TRACER', 'HEAVEN_BIRDS', 'SILVER_WIND', 'CELESTIAL_BELLS', 'PHOENIX_ASH', 'RAZOR_GALE'
+];
 
 function createEmptyLoadoutArray(size) {
   var arr = [];
@@ -44,7 +54,7 @@ function normalizeWeaponKey(rawId) {
 
 function getWeaponMaxLevel(weaponKey) {
   if (typeof WEAPONS === 'undefined' || !WEAPONS[weaponKey]) return Number.POSITIVE_INFINITY;
-  return Number.POSITIVE_INFINITY;
+  return 8;
 }
 
 function getWeaponEvolutionLevel(weaponKey) {
@@ -187,8 +197,53 @@ function makeInventoryPassiveEntry(itemId) {
   return {
     id: itemId,
     level: 1,
-    maxLevel: Number.POSITIVE_INFINITY
+    maxLevel: 8
   };
+}
+
+function ensureLoadoutStatBoostSchema() {
+  if (!GameState.loadoutStatBoosts || typeof GameState.loadoutStatBoosts !== 'object') {
+    GameState.loadoutStatBoosts = {
+      might: 1,
+      cooldown: 1,
+      area: 1,
+      projectileSpeed: 1,
+      duration: 1,
+      moveSpeed: 1,
+      pickupRange: 1,
+      luck: 1
+    };
+  }
+}
+
+function buildLoadoutStatIncreaseChoices() {
+  ensureLoadoutStatBoostSchema();
+  return [
+    makeLevelUpChoice('boost_might', 'Calibrage Brutal', 'fa-solid fa-burst', 'LOADOUT: DMG +6%', function () {
+      GameState.loadoutStatBoosts.might *= 1.04;
+    }, 100),
+    makeLevelUpChoice('boost_cooldown', 'Rythme Parfait', 'fa-solid fa-stopwatch', 'LOADOUT: CD -5%', function () {
+      GameState.loadoutStatBoosts.cooldown *= 0.97;
+    }, 100),
+    makeLevelUpChoice('boost_area', 'Onde Large', 'fa-solid fa-expand', 'LOADOUT: Zone +7%', function () {
+      GameState.loadoutStatBoosts.area *= 1.05;
+    }, 90),
+    makeLevelUpChoice('boost_proj', 'Trajectoire Nette', 'fa-solid fa-location-arrow', 'LOADOUT: Vitesse proj +8%', function () {
+      GameState.loadoutStatBoosts.projectileSpeed *= 1.05;
+    }, 90),
+    makeLevelUpChoice('boost_duration', 'Persistance', 'fa-solid fa-hourglass-half', 'LOADOUT: Duree +8%', function () {
+      GameState.loadoutStatBoosts.duration *= 1.05;
+    }, 85),
+    makeLevelUpChoice('boost_move', 'Mobilite', 'fa-solid fa-person-running', 'LOADOUT: Vitesse deplacement +6%', function () {
+      GameState.loadoutStatBoosts.moveSpeed *= 1.04;
+    }, 80),
+    makeLevelUpChoice('boost_pickup', 'Attraction', 'fa-solid fa-magnet', 'LOADOUT: Range pickup +8%', function () {
+      GameState.loadoutStatBoosts.pickupRange *= 1.05;
+    }, 75),
+    makeLevelUpChoice('boost_luck', 'Chance', 'fa-solid fa-clover', 'LOADOUT: Luck +6%', function () {
+      GameState.loadoutStatBoosts.luck *= 1.04;
+    }, 70)
+  ];
 }
 
 function formatWeaponName(weaponKey) {
@@ -396,7 +451,13 @@ function initializeRunInventoryFromClass(classWeaponId) {
   var starter = getClassStarterKit(clsId, primaryKey);
   var aimed = Array.isArray(starter.aimed) ? starter.aimed : [primaryKey, starter.secondary || getDefaultSecondaryMainWeapon(primaryKey)];
   var auto = Array.isArray(starter.auto) ? starter.auto : [];
-  var combinedWeapons = aimed.concat(auto);
+  var combinedWeapons = [primaryKey];
+  var sourceList = aimed.concat(auto);
+  for (var cw = 0; cw < sourceList.length; cw++) {
+    var wk = normalizeWeaponKey(sourceList[cw]);
+    if (!wk) continue;
+    if (combinedWeapons.indexOf(wk) < 0) combinedWeapons.push(wk);
+  }
   GameState._classRunStats = getClassVsBaselineStats(clsId);
 
   for (var m = 0; m < LOADOUT_LIMITS.mainWeapons; m++) GameState.inventory.mainWeapons[m] = null;
@@ -536,6 +597,7 @@ function buildLoadoutLevelUpOptions(optionCount) {
     var wm = main[i];
     if (!wm) continue;
     (function (slotIndex, entry) {
+      if ((entry.level || 1) >= Math.max(1, Number(entry.maxLevel) || 1)) return;
       var capLabel = formatLevelCap(entry.maxLevel);
       var progress = getChoiceProgress(entry.level, entry.maxLevel);
       var weight = 96 + Math.floor(progress * 24) + Math.floor((luck - 1) * 6);
@@ -555,6 +617,7 @@ function buildLoadoutLevelUpOptions(optionCount) {
     var wa = auto[j];
     if (!wa) continue;
     (function (slotIndex, entry) {
+      if ((entry.level || 1) >= Math.max(1, Number(entry.maxLevel) || 1)) return;
       var capLabel = formatLevelCap(entry.maxLevel);
       var progress = getChoiceProgress(entry.level, entry.maxLevel);
       var weight = 88 + Math.floor(progress * 20) + Math.floor((luck - 1) * 5);
@@ -576,6 +639,7 @@ function buildLoadoutLevelUpOptions(optionCount) {
     var pd = getPassiveItemDef(p.id);
     if (!pd) continue;
     (function (entry, def) {
+      if ((entry.level || 1) >= Math.max(1, Number(entry.maxLevel) || 1)) return;
       var capLabel = formatLevelCap(entry.maxLevel);
       var progress = getChoiceProgress(entry.level, entry.maxLevel);
       var weight = Math.max(45, (def.rarityWeight || 60) + Math.floor(progress * 16) + Math.floor((luck - 1) * 3));
@@ -594,6 +658,13 @@ function buildLoadoutLevelUpOptions(optionCount) {
 
   var ownedWeapons = getAllOwnedWeaponIds();
   var ownedStyles = buildOwnedWeaponStyleMap();
+  var ownedMeleeCount = 0;
+  var ownedRangedCount = 0;
+  for (var ow in ownedWeapons) {
+    if (!ownedWeapons[ow] || !WEAPONS[ow]) continue;
+    if (String(WEAPONS[ow].kind || '').toLowerCase() === 'melee') ownedMeleeCount++;
+    else ownedRangedCount++;
+  }
   var canAddAimed = hasFreeAimedSlot();
   var canAddAuto = hasFreeAutoSlot();
   if (canAddAimed || canAddAuto) {
@@ -607,15 +678,25 @@ function buildLoadoutLevelUpOptions(optionCount) {
 
     for (var weaponId in unifiedWeaponIds) {
       if (ownedWeapons[weaponId] || !WEAPONS[weaponId]) continue;
+      if (Number(WEAPONS[weaponId].maxLevel) === 1) continue; // Skip evolved/final forms from normal offers.
       var rarityBias = Math.max(0.4, 1.2 - (Number(WEAPONS[weaponId].level) || 1) * 0.08);
       var styleKey = getWeaponStyleTag(weaponId);
       var diversityBonus = ownedStyles[styleKey] ? 1.0 : 1.35;
+      var kind = String(WEAPONS[weaponId].kind || 'ranged').toLowerCase();
+      var kindBonus = 1.0;
+      if (kind === 'melee') {
+        if (ownedMeleeCount <= ownedRangedCount) kindBonus = 1.55;
+        else kindBonus = 0.86;
+      } else {
+        if (ownedRangedCount <= ownedMeleeCount) kindBonus = 1.35;
+        else kindBonus = 0.78;
+      }
 
       if (canAddAimed) {
         weaponCandidates.push({
           id: weaponId,
           mode: 'aimed',
-          weight: Math.max(12, Math.floor((40 + (luck - 1) * 7) * aimedSlotPressure * rarityBias * diversityBonus))
+          weight: Math.max(12, Math.floor((40 + (luck - 1) * 7) * aimedSlotPressure * rarityBias * diversityBonus * kindBonus))
         });
       }
       if (canAddAuto) {
@@ -628,6 +709,18 @@ function buildLoadoutLevelUpOptions(optionCount) {
     }
 
     var pickedWeapons = weightedSample(weaponCandidates, luck >= 1.5 ? 3 : 2);
+    var meleeAlreadyPicked = pickedWeapons.some(function (pick) {
+      return WEAPONS[pick.id] && String(WEAPONS[pick.id].kind || '').toLowerCase() === 'melee';
+    });
+    if (!meleeAlreadyPicked && ownedMeleeCount === 0) {
+      var meleeCandidates = weaponCandidates.filter(function (pick) {
+        return WEAPONS[pick.id] && String(WEAPONS[pick.id].kind || '').toLowerCase() === 'melee';
+      });
+      if (meleeCandidates.length && pickedWeapons.length) {
+        var forceMelee = weightedSample(meleeCandidates, 1);
+        if (forceMelee.length) pickedWeapons[0] = forceMelee[0];
+      }
+    }
     for (var pw = 0; pw < pickedWeapons.length; pw++) {
       (function (pick) {
         var weaponId = pick.id;
@@ -643,7 +736,7 @@ function buildLoadoutLevelUpOptions(optionCount) {
           'new_' + mode + '_' + weaponId,
           label + '[' + style + '] ' + formatWeaponName(weaponId),
           WEAPONS[weaponId].icon,
-          'Nouvelle arme (slot ' + (slotFill + 1) + '/' + slotMax + ')',
+          'Nouvelle arme (slot ' + (slotFill + 1) + '/' + slotMax + ')\nDMG: ' + Math.round(WEAPONS[weaponId].dmg || 0) + ' | CD: ' + Number(WEAPONS[weaponId].maxCd || 0).toFixed(2) + 's',
           function () {
             for (var s = 0; s < slotArr.length; s++) {
               if (!slotArr[s]) {
@@ -681,7 +774,7 @@ function buildLoadoutLevelUpOptions(optionCount) {
           'new_passive_' + passiveId,
           def.name,
           def.icon,
-          def.desc || ('Nouvel objet passif (' + getPassiveDeltaLabel(def) + ' ' + def.statKey + ')'),
+          (def.desc || ('Nouvel objet passif (' + getPassiveDeltaLabel(def) + ' ' + def.statKey + ')')) + '\n' + String(def.statKey || '').toUpperCase() + ': ' + getPassiveDeltaLabel(def),
           function () {
             for (var s = 0; s < GameState.inventory.passives.length; s++) {
               if (!GameState.inventory.passives[s]) {
@@ -697,11 +790,17 @@ function buildLoadoutLevelUpOptions(optionCount) {
   }
 
   if (!choices.length) {
-    return [
-      makeLevelUpChoice('fallback_score', 'Bonus Survie', 'fa-solid fa-star', '+500 score', function () {
-        GameState.pScore += 500;
-      }, 1)
-    ];
+    return weightedSample(buildLoadoutStatIncreaseChoices(), count);
+  }
+
+  var newChoices = choices.filter(function (c) {
+    return String(c.id || '').indexOf('new_') === 0;
+  });
+  if (newChoices.length > 0 && count >= 2) {
+    var guaranteedNew = weightedSample(newChoices, 1);
+    var remainingPool = choices.filter(function (c) { return guaranteedNew.indexOf(c) < 0; });
+    var rest = weightedSample(remainingPool, Math.max(0, count - guaranteedNew.length));
+    return guaranteedNew.concat(rest);
   }
 
   return weightedSample(choices, count);
@@ -730,6 +829,7 @@ function syncLegacyWeaponActivationFromInventory() {
 
 function applyRunPassiveStats() {
   ensureRunInventorySchema();
+  ensureLoadoutStatBoostSchema();
   var classStats = GameState._classRunStats || {};
 
   function statOr(base, fallback) {
@@ -809,6 +909,26 @@ function applyRunPassiveStats() {
   if (uniqueStyles >= 3) {
     GameState._runPassiveStats.moveSpeed *= 1.03;
   }
+
+  // Post-cap level-up cards permanently amplify the current run loadout.
+  var boosts = GameState.loadoutStatBoosts || {};
+  var boostMight = Math.min(2.4, Math.max(1, Number(boosts.might) || 1));
+  var boostCd = Math.max(0.55, Math.min(1, Number(boosts.cooldown) || 1));
+  var boostArea = Math.min(2.2, Math.max(1, Number(boosts.area) || 1));
+  var boostProj = Math.min(2.2, Math.max(1, Number(boosts.projectileSpeed) || 1));
+  var boostDuration = Math.min(2.2, Math.max(1, Number(boosts.duration) || 1));
+  var boostMove = Math.min(1.9, Math.max(1, Number(boosts.moveSpeed) || 1));
+  var boostPickup = Math.min(2.0, Math.max(1, Number(boosts.pickupRange) || 1));
+  var boostLuck = Math.min(1.9, Math.max(1, Number(boosts.luck) || 1));
+
+  GameState._runPassiveStats.might *= boostMight;
+  GameState._runPassiveStats.cooldown *= boostCd;
+  GameState._runPassiveStats.area *= boostArea;
+  GameState._runPassiveStats.projectileSpeed *= boostProj;
+  GameState._runPassiveStats.duration *= boostDuration;
+  GameState._runPassiveStats.moveSpeed *= boostMove;
+  GameState._runPassiveStats.pickupRange *= boostPickup;
+  GameState._runPassiveStats.luck *= boostLuck;
 }
 
 function applyRunPassiveStatsToRuntime() {

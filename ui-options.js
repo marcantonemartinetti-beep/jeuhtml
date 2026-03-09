@@ -47,7 +47,8 @@ window.closeOptions = function() {
 window.renderOptions = function() {
     const ui = document.getElementById('optionsUI');
     if (!ui) return;
-    const s = GameState.saveData.settings || { view: 0, particles: 1 };
+    const s = GameState.saveData.settings || { view: 0, particles: 1, vfxIntensity: 70 };
+    const vfxIntensity = Math.max(20, Math.min(100, Number(s.vfxIntensity) || 70));
     
     ui.innerHTML = `
         <h2 style="color:#ffd700;font-family:'Cinzel',serif;margin-bottom:30px;">OPTIONS</h2>
@@ -59,16 +60,33 @@ window.renderOptions = function() {
             <div style="color:#eee;align-self:center;">Particules</div>
             <button onclick="toggleSetting('particles')" style="padding:8px;background:#333;color:#fff;border:1px solid #555;cursor:pointer;">${s.particles===0?'Faible':'Élevé'}</button>
         </div>
+
+                <div style="display:flex;flex-direction:column;gap:8px;width:100%;max-width:400px;margin-bottom:30px;">
+                        <div style="color:#eee;display:flex;justify-content:space-between;align-items:center;">
+                            <span>Intensité VFX</span>
+                            <span style="color:#ffd700;font-weight:700;">${vfxIntensity}%</span>
+                        </div>
+                        <input type="range" min="20" max="100" step="5" value="${vfxIntensity}" oninput="setVfxIntensity(this.value)" style="width:100%;accent-color:#ffd700;cursor:pointer;">
+                        <div style="color:#8a8a8a;font-size:12px;">Réduit le coût visuel global sans changer les dégâts.</div>
+                </div>
         
         <button class="gal-btn" onclick="closeOptions()" style="width:200px;">RETOUR</button>
     `;
 };
 
 window.toggleSetting = function(key) {
-    if (!GameState.saveData.settings) GameState.saveData.settings = { view: 0, particles: 1 };
+    if (!GameState.saveData.settings) GameState.saveData.settings = { view: 0, particles: 1, vfxIntensity: 70 };
     const s = GameState.saveData.settings;
     if (key === 'view') s.view = s.view === 0 ? 1 : 0;
     if (key === 'particles') s.particles = s.particles === 0 ? 1 : 0;
+    localStorage.setItem('dw_save', JSON.stringify(GameState.saveData));
+    renderOptions();
+};
+
+window.setVfxIntensity = function(value) {
+    if (!GameState.saveData.settings) GameState.saveData.settings = { view: 0, particles: 1, vfxIntensity: 70 };
+    const n = Math.max(20, Math.min(100, Number(value) || 70));
+    GameState.saveData.settings.vfxIntensity = n;
     localStorage.setItem('dw_save', JSON.stringify(GameState.saveData));
     renderOptions();
 };

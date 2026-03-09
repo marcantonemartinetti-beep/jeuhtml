@@ -173,24 +173,81 @@ function canUseUpgrade(u) {
   }
 }
 
+function getLevelUpCardCount() {
+  const base = 3;
+  const extra = Math.max(0, Math.floor(GameState.pLevelUpExtraCards || 0));
+  return Math.min(7, base + extra);
+}
+
+function isLevelUpChoiceBanned(choiceId) {
+  if (!choiceId) return false;
+  const banned = GameState.levelUpBannedChoices || {};
+  return !!banned[choiceId];
+}
+
+function updateLevelUpActionButtons() {
+  const rerollBtn = document.getElementById('rerollBtn');
+  const banBtn = document.getElementById('banBtn');
+  const rerollsLeft = Math.max(0, Math.floor(GameState.levelUpRerollsLeft || 0));
+  const bansLeft = Math.max(0, Math.floor(GameState.levelUpBansLeft || 0));
+
+  if (rerollBtn) {
+    rerollBtn.innerHTML = `<i class="fa-solid fa-dice"></i> REROLL (${rerollsLeft})`;
+    rerollBtn.disabled = rerollsLeft <= 0;
+  }
+  if (banBtn) {
+    banBtn.innerHTML = `<i class="fa-solid fa-ban"></i> BAN (${bansLeft})`;
+    banBtn.disabled = bansLeft <= 0;
+    banBtn.classList.toggle('active', !!GameState.levelUpBanMode && bansLeft > 0);
+  }
+}
+
+window.toggleBanMode = function() {
+  const bansLeft = Math.max(0, Math.floor(GameState.levelUpBansLeft || 0));
+  if (bansLeft <= 0) {
+    addNotif('Plus de BAN disponibles.', '#ff7a7a');
+    GameState.levelUpBanMode = false;
+    updateLevelUpActionButtons();
+    return;
+  }
+  GameState.levelUpBanMode = !GameState.levelUpBanMode;
+  updateLevelUpActionButtons();
+  if (GameState.levelUpBanMode) addNotif('Mode BAN actif: clique une carte a bannir.', '#ffcf70');
+};
+
 function getLevelUpChoices(count) {
   const wanted = Math.max(1, Number(count) || 3);
+  const target = wanted;
+  const banned = GameState.levelUpBannedChoices || {};
+  const keepUnique = {};
   try {
     if (typeof buildLoadoutLevelUpOptions === 'function') {
-      const modern = buildLoadoutLevelUpOptions(wanted);
-      if (Array.isArray(modern) && modern.length) {
-        return modern.map((choice) => ({
-          id: choice.id,
-          name: choice.name,
-          icon: choice.icon || 'fa-solid fa-star',
-          type: choice.type || 'loadout',
-          desc: choice.desc || '',
-          descHtml: String(choice.desc || '').replace(/\n/g, '<br>'),
-          apply: choice.apply,
-          rarityClass: (choice.weight || 0) >= 95 ? 'legendary' : ((choice.weight || 0) >= 70 ? 'rare' : 'common'),
-          rarityName: (choice.weight || 0) >= 95 ? 'Mythique' : ((choice.weight || 0) >= 70 ? 'Rare' : 'Commun'),
-          _skipLegacyTrack: true
-        }));
+      const modernOut = [];
+      for (let attempt = 0; attempt < 4 && modernOut.length < target; attempt++) {
+        const rollSize = Math.max(target + 2, target);
+        const modern = buildLoadoutLevelUpOptions(rollSize);
+        if (!Array.isArray(modern) || !modern.length) continue;
+        for (let i = 0; i < modern.length && modernOut.length < target; i++) {
+          const choice = modern[i];
+          if (!choice || !choice.id) continue;
+          if (banned[choice.id] || keepUnique[choice.id]) continue;
+          keepUnique[choice.id] = true;
+          modernOut.push({
+            id: choice.id,
+            name: choice.name,
+            icon: choice.icon || 'fa-solid fa-star',
+            type: choice.type || 'loadout',
+            desc: choice.desc || '',
+            descHtml: String(choice.desc || '').replace(/\n/g, '<br>'),
+            apply: choice.apply,
+            rarityClass: (choice.weight || 0) >= 95 ? 'legendary' : ((choice.weight || 0) >= 70 ? 'rare' : 'common'),
+            rarityName: (choice.weight || 0) >= 95 ? 'Mythique' : ((choice.weight || 0) >= 70 ? 'Rare' : 'Commun'),
+            _skipLegacyTrack: true
+          });
+        }
+      }
+      if (modernOut.length) {
+        return modernOut;
       }
     }
   } catch (e) {
@@ -198,10 +255,16 @@ function getLevelUpChoices(count) {
   }
 
   // Legacy fallback for compatibility if loadout module is unavailable.
-  const legacyPool = UPGRADES.filter(canUseUpgrade).concat(getWeaponPathUpgrades().filter(canUseUpgrade));
+  const legacyPool = UPGRADES
+    .filter(canUseUpgrade)
+    .filter((u) => !isLevelUpChoiceBanned(u && u.id))
+    .concat(getWeaponPathUpgrades().filter(canUseUpgrade).filter((u) => !isLevelUpChoiceBanned(u && u.id)));
   const out = [];
+  const usedIds = {};
   for (let i = 0; i < wanted && legacyPool.length > 0; i++) {
     const u = legacyPool[Math.floor(Math.random() * legacyPool.length)];
+    if (!u || !u.id || usedIds[u.id]) continue;
+    usedIds[u.id] = true;
     const r = Math.random();
     let rarity = RARITIES.common;
     if (r > 0.9) rarity = RARITIES.legendary;
@@ -226,7 +289,7 @@ function getLevelUpChoices(count) {
 // ==================== LEVEL UP SCREEN ====================
 function showLevelUp() {
   if (GameState.autoUpgrade) {
-    const choices = getLevelUpChoices(3);
+    const choices = getLevelUpChoices(getLevelUpCardCount());
     if (choices.length > 0) {
       const pick = choices[Math.floor(Math.random() * choices.length)];
       pick.apply();
@@ -264,15 +327,35 @@ function showLevelUp() {
   selectedUpgradeId = null;
   const btn = document.getElementById('confirmUpgradeBtn');
   if(btn) btn.style.display = 'none';
+  GameState.levelUpBanMode = false;
+  updateLevelUpActionButtons();
   
-  rerollUpgrades();
+  rerollUpgrades(true);
 }
 
-function rerollUpgrades() {
+function rerollUpgrades(isFreeRoll) {
+  if (!isFreeRoll) {
+    const rerollsLeft = Math.max(0, Math.floor(GameState.levelUpRerollsLeft || 0));
+    if (rerollsLeft <= 0) {
+      addNotif('Plus de reroll disponibles.', '#ff7a7a');
+      updateLevelUpActionButtons();
+      return;
+    }
+    GameState.levelUpRerollsLeft = rerollsLeft - 1;
+    GameState.levelUpBanMode = false;
+  }
+
   const c = document.getElementById('upCards');
   if (!c) return;
   c.innerHTML = '';
-  const choices = getLevelUpChoices(3);
+  const choices = getLevelUpChoices(getLevelUpCardCount());
+
+  updateLevelUpActionButtons();
+
+  if (!choices.length) {
+    c.innerHTML = '<div style="color:#c9b9a1;font-family:sans-serif;opacity:.9">Aucune carte disponible (pool epuise).</div>';
+    return;
+  }
 
   for (let i = 0; i < choices.length; i++) {
     const choice = choices[i];
@@ -293,7 +376,28 @@ function rerollUpgrades() {
       <div class="c-name">${choice.name}</div>
       <div class="c-desc">${choice.descHtml || choice.desc || ''}</div>
     `;
-    el.onclick = () => selectUpgrade({ apply: choice.apply, _skipLegacyTrack: !!choice._skipLegacyTrack }, choice.id, el);
+    el.onclick = () => {
+      if (GameState.levelUpBanMode) {
+        const bansLeft = Math.max(0, Math.floor(GameState.levelUpBansLeft || 0));
+        if (bansLeft <= 0) {
+          GameState.levelUpBanMode = false;
+          updateLevelUpActionButtons();
+          return;
+        }
+        if (!choice.id) {
+          addNotif('Cette carte ne peut pas etre bannie.', '#ff9a9a');
+          return;
+        }
+        if (!GameState.levelUpBannedChoices) GameState.levelUpBannedChoices = {};
+        GameState.levelUpBannedChoices[choice.id] = true;
+        GameState.levelUpBansLeft = bansLeft - 1;
+        GameState.levelUpBanMode = false;
+        addNotif(`BANNI: ${choice.name}`, '#ffcf70');
+        rerollUpgrades(true);
+        return;
+      }
+      selectUpgrade({ apply: choice.apply, _skipLegacyTrack: !!choice._skipLegacyTrack }, choice.id, el);
+    };
     c.appendChild(el);
   }
 }

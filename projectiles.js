@@ -53,6 +53,17 @@ const _projCurDir = new THREE.Vector3();
 const _projRight = new THREE.Vector3();
 var familyGroundZones = [];
 
+function getFamilyHomingAssist(family) {
+  switch (family) {
+    case 'precision': return 0.05;
+    case 'alchemy': return 0.09;
+    case 'arcane': return 0.10;
+    case 'storm': return 0.08;
+    case 'shadow': return 0.09;
+    default: return 0.07;
+  }
+}
+
 function weaponKeyHash(key) {
   const src = String(key || 'UNKNOWN');
   let h = 2166136261 >>> 0;
@@ -69,6 +80,9 @@ function inferWeaponFamily(weaponKey) {
   if (k.includes('LIGHTNING') || k.includes('THUNDER') || k.includes('SPARK') || k.includes('CHAIN') || k.includes('JUDGMENT')) return 'storm';
   if (k.includes('POTION') || k.includes('FLASK') || k.includes('ALCHEM') || k.includes('BOMB') || k.includes('MORTAR')) return 'alchemy';
   if (k.includes('VOID') || k.includes('SHADOW') || k.includes('DARK') || k.includes('PHANTOM') || k.includes('FATE') || k.includes('ECLIPSE')) return 'shadow';
+  if (k.includes('BELL') || k.includes('CARILLON') || k.includes('TRACER')) return 'arcane';
+  if (k.includes('WIND') || k.includes('GALE') || k.includes('RAZOR')) return 'precision';
+  if (k.includes('BIRD') || k.includes('FALCON') || k.includes('PHOENIX') || k.includes('PLUME')) return 'storm';
   if (k.includes('ARCANE') || k.includes('MAGIC') || k.includes('SCEPTER') || k.includes('GRIMOIRE') || k.includes('RUNE') || k.includes('SUN') || k.includes('STAR') || k.includes('TOME')) return 'arcane';
   if (k.includes('SPEAR') || k.includes('LANCE') || k.includes('JAVELIN') || k.includes('RAIL') || k.includes('BOW') || k.includes('RIFLE') || k.includes('PISTOL') || k.includes('REVOLVER')) return 'precision';
   return 'martial';
@@ -188,7 +202,8 @@ class Proj {
     this.pierce = props.pierce || 0;
     this.bounce = props.bounce || 0;
     this.boomerang = props.boomerang || false;
-    this.homing = props.homing || 0;
+    // Halo-based spawn points sit above the player, so apply a light family-tuned homing assist.
+    this.homing = Math.max(Number(props.homing) || 0, getFamilyHomingAssist(family));
     this.blast = props.blast || 0;
     this.gravity = props.gravity || 0;
     this.orbit = props.orbit || false;
@@ -298,9 +313,10 @@ class Proj {
         }
 
         this.trailT += dt;
-        if (this.trailT >= this.signature.trailTick) {
+        const fxTrailMul = 1 / Math.max(0.2, getFxBudgetFactor());
+        if (this.trailT >= this.signature.trailTick * fxTrailMul) {
           this.trailT = 0;
-          spawnPart(this.m.position.clone(), this.familyStyle.color, 1, this.familyStyle.trailPulse);
+          spawnPart(this.m.position, this.familyStyle.color, 1, this.familyStyle.trailPulse);
         }
 
         if (this.m.position.y < terrainH(this.m.position.x, this.m.position.z)) {
@@ -737,9 +753,13 @@ function recyclePart(m) {
 }
 
 function spawnPart(pos, col, n, spd = 3) {
-  if (GameState.saveData.settings && GameState.saveData.settings.particles === 0) {
-      n = Math.ceil(n * 0.3); // Reduce particles if setting is Low
-  }
+  const fx = getFxBudgetFactor();
+  let target = (Number(n) || 0) * fx;
+  if (target <= 0.05) return;
+
+  // Probabilistic emission avoids hard floor of 1 particle when under budget.
+  n = target < 1 ? (Math.random() < target ? 1 : 0) : Math.floor(target);
+  if (n <= 0) return;
 
   for (let i = 0; i < n; i++) {
     const m = getPart();
@@ -809,6 +829,18 @@ function updPart(dt) {
       dmgNums.splice(i, 1);
     }
   }
+}
+
+function getFxBudgetFactor() {
+  const lowFx = !!(GameState && GameState.saveData && GameState.saveData.settings && GameState.saveData.settings.particles === 0);
+  const userFx = Math.max(20, Math.min(100, Number(GameState && GameState.saveData && GameState.saveData.settings && GameState.saveData.settings.vfxIntensity) || 70)) / 100;
+  const base = lowFx ? 0.45 : 1.0;
+  const pCount = (typeof particles !== 'undefined' && particles) ? particles.length : 0;
+  const prCount = (typeof projectiles !== 'undefined' && projectiles) ? projectiles.length : 0;
+
+  // Scale down progressively under heavy combat load.
+  const pressure = Math.min(0.72, pCount / 650 + prCount / 520);
+  return Math.max(0.12, base * (1 - pressure) * userFx);
 }
 
 // Export
